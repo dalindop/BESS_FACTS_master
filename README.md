@@ -1,6 +1,6 @@
 # BESS_FACTS_master
 
-Repositorio principal para el desarrollo de la tesis de maestría enfocada en la integración de **BESS (Battery Energy Storage Systems)** y **FACTS (Flexible AC Transmission Systems)** en modelos de expansión y operación del sistema eléctrico utilizando **Pyomo**.
+Repositorio principal de trabajo para la tesis de maestría enfocada en la integración de **BESS (Battery Energy Storage Systems)** y **FACTS (Flexible AC Transmission Systems)** en modelos de expansión/operación del sistema eléctrico colombiano mediante optimización matemática en **Pyomo**.
 
 ---
 
@@ -8,17 +8,26 @@ Repositorio principal para el desarrollo de la tesis de maestría enfocada en la
 
 Este repositorio tiene como propósito:
 
-1. Reproducir el modelo baseline desarrollado originalmente en **HEPISA (modelo de Álvaro)**.
-2. Modernizar el entorno computacional.
-3. Construir una arquitectura modular, limpia y mantenible.
-4. Integrar dispositivos **FACTS** como aporte principal de tesis.
-5. Evaluar escenarios comparativos de flexibilidad del sistema eléctrico.
+1. **Reproducir y validar** el modelo base desarrollado por Álvaro.
+2. **Migrar el modelo a una arquitectura limpia y modular** usando Python moderno y Pyomo actualizado.
+3. **Incorporar dispositivos FACTS** dentro del problema de localización, dimensionamiento y operación del BESS.
+4. Evaluar escenarios comparativos para analizar impactos técnicos y económicos.
 
 ---
 
-# Estructura del repositorio
+# Arquitectura del proyecto
 
-```text
+La estructura del proyecto está organizada para mantener una separación clara entre:
+
+* Datos
+* Modelo matemático
+* Solver
+* Postprocesamiento
+* Experimentos
+* Validación
+* Documentación
+
+```txt
 BESS_FACTS_master/
 │
 ├── 01_Data/
@@ -29,459 +38,502 @@ BESS_FACTS_master/
 ├── 06_Docs/
 ├── 07_Notebooks/
 │
-├── README.md
 ├── .gitignore
+├── README.md
 └── BESS_FACTS_master.code-workspace
 ```
 
 ---
 
-# Descripción de carpetas
+# Estructura detallada
 
-## `01_Data/`
+## 01_Data/
 
-Contiene todos los **datos de entrada del modelo**.
+Contiene todos los datos del proyecto.
 
-Aquí se almacenan:
-
-- Topología de red
-- Demandas
-- Generación
-- Parámetros eléctricos
-- Tecnologías BESS
-- Casos de estudio
-- Archivos Excel/CSV
-
-Ejemplo esperado:
-
-```text
+```txt
 01_Data/
 │
-├── Raw/
-├── Processed/
-└── Test_Cases/
+├── 01_Raw/
+├── 02_Processed/
+└── 03_Test_Cases/
 ```
 
-### `Raw/`
+### 01_Raw/
 
-Datos originales.
-
-**Nunca modificarlos directamente.**
-
-Ejemplo:
-
-```text
-Tech.csv
-system_data.xlsx
-```
-
----
-
-### `Processed/`
-
-Datos ya procesados o transformados para el modelo.
-
-Ejemplo:
-
-- normalización
-- limpieza de datos
-- formatos intermedios
-
----
-
-### `Test_Cases/`
-
-Casos de prueba del modelo.
+Datos originales sin modificar.
 
 Ejemplos:
 
-```text
-24h/
-168h/
-720h/
-IEEE_9/
-IEEE_14/
-```
+* Archivos de Álvaro
+* Datos XM
+* Casos IEEE
+* Excel originales
+* CSV crudos
+
+**Regla:** nunca modificar archivos aquí.
 
 ---
 
-## `02_Model/`
+### 02_Processed/
 
-Es el **núcleo matemático del proyecto**.
+Datos ya limpios y transformados para el modelo.
 
-Aquí vive el modelo de optimización construido en Pyomo.
+Ejemplos:
 
-Arquitectura esperada:
+* Matrices organizadas
+* Datos normalizados
+* Parámetros preprocesados
 
-```text
+---
+
+### 03_Test_Cases/
+
+Casos pequeños para pruebas rápidas.
+
+Ejemplos:
+
+* IEEE 9 buses
+* IEEE 14 buses
+* Casos reducidos de Colombia
+
+Se usarán para validar FACTS antes de escalar.
+
+---
+
+# 02_Model/
+
+Corazón del modelo matemático.
+
+Aquí vive toda la formulación de optimización.
+
+```txt
 02_Model/
 │
-├── Core/
-├── BESS/
-├── FACTS/
-├── Solvers/
-└── Utils/
+├── main.py
+│
+├── 01_Inputs/
+├── 02_Core/
+├── 03_Solvers/
+├── 04_Postprocessing/
+└── 05_Utils/
 ```
 
 ---
 
-### `Core/`
+## main.py
 
-Modelo baseline de optimización.
+Archivo principal.
 
-Contendrá:
+Coordina el flujo completo:
 
-```text
-sets.py
-parameters.py
-variables.py
-constraints.py
-objective.py
-model_builder.py
+```txt
+leer datos
+↓
+validar datos
+↓
+crear modelo
+↓
+resolver
+↓
+guardar resultados
 ```
 
-#### `sets.py`
+**No debe contener matemáticas del modelo.**
 
-Define los conjuntos del problema.
+Solo coordinación.
+
+---
+
+## 01_Inputs/
+
+Lectura y validación de datos.
+
+```txt
+01_Inputs/
+│
+├── 01_data_loader.py
+└── 02_data_validation.py
+```
+
+### 01_data_loader.py
+
+Carga archivos:
+
+* Excel
+* CSV
+* JSON
+* Casos de prueba
+
+Ejemplo:
+
+* demanda
+* líneas
+* buses
+* generadores
+* parámetros BESS
+
+---
+
+### 02_data_validation.py
+
+Verifica consistencia de datos.
+
+Ejemplos:
+
+* valores faltantes
+* buses inexistentes
+* reactancias vacías
+* errores dimensionales
+
+---
+
+## 02_Core/
+
+Núcleo matemático del modelo Pyomo.
+
+```txt
+02_Core/
+│
+├── 01_sets.py
+├── 02_parameters.py
+├── 03_variables.py
+├── 04_objective.py
+├── 05_constraints.py
+└── 06_model_builder.py
+```
+
+---
+
+### 01_sets.py
+
+Define conjuntos del modelo.
+
+Ejemplos:
+
+* buses
+* líneas
+* generadores
+* tiempo
+* tecnologías
+
+---
+
+### 02_parameters.py
+
+Parámetros del sistema.
+
+Ejemplos:
+
+* demanda
+* reactancias
+* costos
+* límites de generación
+* eficiencia BESS
+
+---
+
+### 03_variables.py
+
+Variables de decisión.
+
+Ejemplos:
+
+* generación
+* flujo
+* ángulos
+* SOC batería
+* potencia carga/descarga
+
+---
+
+### 04_objective.py
+
+Función objetivo.
+
+Ejemplos:
+
+Minimizar:
+
+* costo operacional
+* costo inversión
+* penalizaciones
+* costos FACTS
+
+---
+
+### 05_constraints.py
+
+Restricciones matemáticas.
+
+Ejemplos:
+
+* balance nodal
+* flujo DC
+* límites de línea
+* SOC del BESS
+* restricciones FACTS
+
+---
+
+### 06_model_builder.py
+
+Construye el modelo completo.
+
+Se encarga de ensamblar:
+
+```txt
+sets
+↓
+parameters
+↓
+variables
+↓
+objective
+↓
+constraints
+```
+
+---
+
+## 03_Solvers/
+
+Configuración y ejecución del solver.
+
+```txt
+03_Solvers/
+│
+├── 01_solvers_config.py
+└── 02_solvers_runner.py
+```
+
+### 01_solvers_config.py
+
+Configura solver.
+
+Ejemplos:
+
+* CBC
+* Gurobi
+* HiGHS
+* CPLEX
+
+Parámetros:
+
+* mip gap
+* threads
+* time limit
+
+---
+
+### 02_solvers_runner.py
+
+Ejecuta la optimización.
 
 Ejemplo:
 
 ```python
-model.b = Set()
-model.t = Set()
+results = solver.solve(model)
 ```
 
 ---
 
-#### `parameters.py`
+## 04_Postprocessing/
 
-Carga los parámetros del sistema.
+Resultados y visualización.
 
-Ejemplos:
+```txt
+04_Postprocessing/
+│
+├── 01_results_export.py
+├── 02_plots.py
+└── 03_kpi_analysis.py
+```
 
-- demanda
-- reactancias
-- costos
-- límites de transmisión
+### 01_results_export.py
 
----
-
-#### `variables.py`
-
-Define las variables de decisión.
-
-Ejemplos:
-
-- generación
-- potencia BESS
-- energía almacenada
-- flujo de potencia
-- ángulos nodales
-
----
-
-#### `constraints.py`
-
-Define todas las restricciones.
+Exporta resultados.
 
 Ejemplos:
 
-- balance nodal
-- flujo DC
-- SOC de baterías
-- límites de líneas
-- binarias de carga/descarga
+* Excel
+* CSV
+* DataFrames
 
 ---
 
-#### `objective.py`
+### 02_plots.py
 
-Función objetivo del modelo.
-
-Ejemplo:
-
-Minimización de:
-
-- costos operativos
-- inversión
-- penalizaciones
-
----
-
-### `BESS/`
-
-Restricciones específicas del sistema de almacenamiento.
+Gráficas.
 
 Ejemplos:
 
-- carga/descarga
-- SOC
-- degradación
-- límites energéticos
+* despacho
+* SOC batería
+* utilización FACTS
+* costos
 
 ---
 
-### `FACTS/`
+### 03_kpi_analysis.py
 
-Aquí irá el aporte principal de tesis.
+Indicadores del sistema.
 
-Incluye:
+Ejemplos:
 
-- formulación matemática
-- variables FACTS
-- restricciones adicionales
-- linealizaciones
+* costos totales
+* congestión
+* reducción pérdidas
+* utilización BESS
 
-Ejemplos futuros:
+---
 
-```text
-tcsc.py
-svc.py
-facts_constraints.py
+## 05_Utils/
+
+Funciones auxiliares reutilizables.
+
+```txt
+05_Utils/
+│
+├── 01_paths.py
+├── 02_helpers.py
+└── 03_loggers.py
+```
+
+### 01_paths.py
+
+Centraliza rutas del proyecto.
+
+Evita hardcoding.
+
+---
+
+### 02_helpers.py
+
+Funciones pequeñas reutilizables.
+
+Ejemplos:
+
+* conversiones
+* limpieza
+* validaciones rápidas
+
+---
+
+### 03_loggers.py
+
+Mensajes organizados del sistema.
+
+Ejemplos:
+
+```txt
+Modelo construido
+Solver iniciado
+Resultados exportados
 ```
 
 ---
 
-### `Solvers/`
+# 03_Experiments/
 
-Configuraciones de solucionadores.
-
-Ejemplos:
-
-```text
-cbc_solver.py
-gurobi_solver.py
-highs_solver.py
-```
-
-Aquí se definirán:
-
-- mip gap
-- límites de tiempo
-- tolerancias
-- threads
-
----
-
-### `Utils/`
-
-Funciones auxiliares.
-
-Ejemplo:
-
-- lectura de archivos
-- exportación
-- procesamiento de resultados
-
----
-
-## `03_Experiments/`
-
-Scripts para correr distintos escenarios.
+Escenarios de simulación.
 
 Ejemplos:
 
-```text
-run_24h.py
-run_168h.py
-run_720h.py
-run_facts_case.py
-```
+* 24h
+* 168h
+* 720h
 
-Objetivo:
+Escenarios:
 
-Separar experimentos del modelo base.
+* baseline
+* solo BESS
+* solo FACTS
+* BESS + FACTS
 
 ---
 
-## `04_Outputs/`
+# 04_Outputs/
 
 Resultados generados automáticamente.
 
 Ejemplos:
 
-```text
-Excel/
-Figures/
-Logs/
-```
-
-Aquí irán:
-
-- resultados Excel
-- gráficas
-- logs del solver
-- reportes
-
-### Importante
-
-Esta carpeta **NO debe versionarse en GitHub**.
-
-Solo contiene archivos generados.
+* Excel
+* figuras
+* reportes
+* logs
 
 ---
 
-## `05_Tests/`
+# 05_Tests/
 
-Pruebas del modelo.
-
-Objetivo:
-
-Validar que el código no se rompa.
+Pruebas unitarias y validaciones.
 
 Ejemplos:
 
-- consistencia dimensional
-- validación baseline
-- comparación contra HEPISA
+* validación de restricciones
+* consistencia de datos
+* comparación con Álvaro
 
 ---
 
-## `06_Docs/`
+# 06_Docs/
 
-Documentación técnica del proyecto.
-
-Ejemplo esperado:
-
-```text
-06_Docs/
-│
-├── bitacora.md
-├── ecuaciones.md
-└── architecture.md
-```
-
----
-
-### `bitacora.md`
-
-Registro técnico de decisiones.
+Documentación de tesis.
 
 Ejemplos:
 
-- cambios de solver
-- mejoras numéricas
-- bugs encontrados
-- validaciones
+* papers
+* notas técnicas
+* decisiones de modelado
+* formulaciones matemáticas
 
 ---
 
-### `ecuaciones.md`
+# 07_Notebooks/
 
-Formulación matemática del modelo.
+Análisis exploratorio.
 
-Incluye:
+Jupyter notebooks para:
 
-- baseline HEPISA
-- ecuaciones BESS
-- formulación FACTS
-- linealizaciones
-
----
-
-### `architecture.md`
-
-Mapa conceptual del software.
-
-Incluye:
-
-- flujo de datos
-- dependencias
-- arquitectura modular
+* visualización rápida
+* pruebas
+* debugging
 
 ---
 
-## `07_Notebooks/`
+# Convención de trabajo
 
-Exploración rápida y análisis.
+## GitFlow
 
-Uso esperado:
+Se trabajará con:
 
-- pruebas pequeñas
-- visualización
-- depuración matemática
-
-**No usar para el modelo final.**
-
----
-
-# Flujo Git recomendado
-
-Nunca trabajar directamente sobre `main`.
-
-Estructura:
-
-```text
+```txt
 main
-↑
 develop
-↑
 feature/*
 ```
 
 Ejemplos:
 
-```text
-feature/project-skeleton
+```txt
 feature/core-model
-feature/bess-module
-feature/facts-formulation
-feature/solver-config
-feature/validation-baseline
+feature/facts-model
+feature/validation
 ```
 
 ---
 
-# Principios de desarrollo
+## Regla del proyecto
 
-1. **Reproducir antes de extender**
-2. **Validar antes de optimizar**
-3. **Una feature = un propósito**
-4. **Cambios pequeños y trazables**
-5. **No modificar múltiples componentes críticos simultáneamente**
+Antes de agregar FACTS:
 
----
+**el modelo base de Álvaro debe estar completamente reproducido y validado en esta nueva arquitectura.**
 
-# Roadmap de tesis
+Luego:
 
-## Fase 1 — Reproducción baseline
-
-- [ ] Reproducir modelo de Álvaro
-- [ ] Validar 24h
-- [ ] Validar 168h
-- [ ] Validar 720h
-
----
-
-## Fase 2 — Reimplementación limpia
-
-- [ ] Modularización
-- [ ] Migración Pyomo moderno
-- [ ] Solver robusto
-- [ ] Validación cruzada
-
----
-
-## Fase 3 — Integración FACTS
-
-- [ ] Formulación matemática
-- [ ] Linealización
-- [ ] Integración Pyomo
-
----
-
-## Fase 4 — Experimentos de tesis
-
-- [ ] Escenarios comparativos
-- [ ] Sensibilidades
-- [ ] Resultados finales
-
----
-
-# Nota importante
-
-Si en algún momento el proyecto se vuelve caótico:
-
-> **Volver al baseline validado antes de continuar.**
-
-No introducir múltiples cambios críticos al mismo tiempo.
+1. Validación baseline
+2. Integración FACTS
+3. Comparación de escenarios
+4. Resultados de tesis
