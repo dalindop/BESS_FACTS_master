@@ -537,3 +537,61 @@ Luego:
 2. Integración FACTS
 3. Comparación de escenarios
 4. Resultados de tesis
+
+## Environment Setup
+
+This repository uses an isolated Python environment (`.venv`) for reproducibility.
+
+### Recommended Python version
+
+```txt
+Python 3.11.x
+```
+
+### Create environment
+
+```bash
+python -m venv .venv
+```
+
+### Activate environment
+
+**Git Bash**
+
+```bash
+source .venv/Scripts/activate
+```
+
+**PowerShell**
+
+```powershell
+.venv\Scripts\activate
+```
+
+### Install dependencies
+
+```bash
+pip install -r requirements-lock.txt
+```
+
+### Main scientific stack
+
+* Pyomo
+* Pandas
+* NumPy
+* Matplotlib
+* SciPy
+* OpenPyXL
+* Jupyter Notebook
+
+### Solver strategy
+
+Current development uses open-source solvers during prototyping.
+
+Planned production solver:
+
+* Gurobi (academic license)
+
+Fallback solver:
+
+* CBC
