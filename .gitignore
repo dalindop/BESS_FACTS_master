@@ -122,3 +122,50 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# ==========================================
+
+# Thesis specific
+
+# ==========================================
+
+# VS Code
+
+.vscode/
+*.code-workspace
+
+# Optimization outputs
+
+*.lp
+*.sol
+*.mps
+
+# Solver logs
+
+solver.log
+cbc.log
+gurobi.log
+*.log
+
+# Results and generated outputs
+
+04_Outputs/
+
+# Temporary files
+
+temp/
+tmp/
+
+# HDF5
+
+*.h5
+
+# Excel temporary files
+
+~$*.xlsx
+
+# OS
+
+.DS_Store
+Thumbs.db
+

@@ -1,0 +1,9 @@
+pyomo
+pandas
+numpy
+matplotlib
+openpyxl
+scipy
+jupyter
+notebook
+ipykernel
