@@ -23,6 +23,8 @@ Equivalencia con el codigo legacy de Alvaro:
      S    |  --    | Nodos candidatos para BESS (nuevo)
      F    |  --    | Lineas candidatas para FACTS/TCSC (nuevo)
      T    |  t     | Periodos de tiempo del horizonte
+     K    |  L     | Segmentos de linealizacion de perdidas
+     M    |  k     | Segmentos de linealizacion de costo de gen
 
 ==================================================================
 
@@ -63,10 +65,10 @@ def build_sets(model, data):
     # Subconjuntos de R por tecnologia: eolica y solar
     # nota-python: within=model.R obliga a que los elementos pertenezcan
     # a R.
-    # nota-python: getattr(data,"gen_eol",[]) toma data.gen_eol; si ese
+    # getattr(data,"gen_eol",[]) toma/busca data.gen_eol; si ese
     # atributo no existe, usa lista vacia [].
     model.R_eol = pyo.Set(within=model.R,
-                          initialize=getattr(data, "gen_eol", []),
+                          initialize=getattr(data, "gen_eol", []), 
                           ordered=True)
     model.R_sol = pyo.Set(within=model.R,
                           initialize=getattr(data, "gen_sol", []),
@@ -84,6 +86,16 @@ def build_sets(model, data):
                       ordered=True)    # nodos candidatos para BESS
     model.F = pyo.Set(initialize=getattr(data, "lineas_facts", []),
                       ordered=True)    # lineas candidatas para FACTS
+    
+    # Union de lineas existentes y candidatas: L_ALL = L U LC.
+    # El flujo, los limites de flujo y el balance nodal se definen sobre
+    # TODAS las lineas (existentes + candidatas). Una linea candidata
+    # existe en el modelo, pero su flujo se forzara a 0 mediante una
+    # restriccion Big-M si no se construye (x_l = 0). Definir la union
+    # aqui, una sola vez, evita repetir el concepto en variables.py y
+    # constraints.py.
+    # Operador | = union de conjuntos (L U LC)
+    model.L_ALL = model.L | model.LC 
 
     # ------------------------------------------------------------------
     # Conjuntos auxiliares de linealizacion
@@ -93,7 +105,7 @@ def build_sets(model, data):
     # n_cost = costo de generación térmica, n_perd = perdidas en las lineas.
     n_perd = getattr(data, "n_seg_perdidas", 3)  # por defecto 3 tramos
     n_cost = getattr(data, "n_seg_costo", 3)
-    model.SEG_PERD = pyo.RangeSet(1, n_perd)  # tramos de perdidas
-    model.SEG_COST = pyo.RangeSet(1, n_cost)  # tramos de costo de gen.
+    model.SEG_PERD = pyo.RangeSet(1, n_perd)  # tramos de perdidas (K)
+    model.SEG_COST = pyo.RangeSet(1, n_cost)  # tramos de costo de gen (M)
 
     return model
