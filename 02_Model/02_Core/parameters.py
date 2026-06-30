@@ -27,7 +27,7 @@ FILOSOFIA (acordada con la direccion de tesis):
       causaba problemas de reproducibilidad en el codigo legacy y
       acelera la construccion del modelo (se usa initialize= con dicts
       ya armados, en vez de rule= que llama una funcion por cada indice).
-
+==================================================================
 """
 
 import math

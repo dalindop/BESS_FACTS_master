@@ -54,6 +54,8 @@ def build_sets(model, data):
     # pyo.Set(initialize=lista) crea el conjunto desde una lista
     model.N = pyo.Set(initialize=data.nodos,  ordered=True)  # nodos
     model.L = pyo.Set(initialize=data.lineas, ordered=True)  # lineas
+    # nodo de referencia (slack) para el balance nodal
+    model.nodo_ref = getattr(data, "nodo_slack", data.nodos[0])
 
     # ------------------------------------------------------------------
     # Conjuntos de generacion

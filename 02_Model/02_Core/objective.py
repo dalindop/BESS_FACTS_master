@@ -33,6 +33,7 @@ ALCANCE DE ESTE PASO:
 
   Las renovables NO entran en la objetivo: su costo marginal es ~0, su
   despacho lo fija la disponibilidad del recurso (ver tesis Cap. 3).
+==================================================================
 """
 
 import pyomo.environ as pyo
