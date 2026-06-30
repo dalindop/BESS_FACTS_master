@@ -27,6 +27,7 @@ NOTACION: identica a la tabla de variables del Cap. 3 de la tesis.
   Binarias : x_l, y_s, u[g,t], SU[g,t], SD[g,t], u_ch[s,t], u_dis[s,t]
   Continuas: P[g,t], P[h,t], P[r,t], Pcurt[r,t], f[ij,t], theta[i,t],
              Pch[s,t], Pdis[s,t], SoC[s,t], Psmax[s], Esmax[s]
+==================================================================
 """
 
 import pyomo.environ as pyo
