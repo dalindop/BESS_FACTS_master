@@ -53,6 +53,7 @@ def _incidencia(model, data):
     # haciendo que el código sea más rápido, legible y fácil de mantener.
     # nuevo_diccionario = {clave: valor for elemento in iterable if condicion}
     #.append(): Este es un comando para añadir algo al final de una lista
+    # Σ(fji − fij) de ahí sale esta matriz de incidencia
     lines_in = {n: [] for n in model.N}   # lineas que llegan al nodo
     lines_out = {n: [] for n in model.N}  # lineas que salen del nodo
     for l in model.L_ALL:
@@ -79,6 +80,22 @@ def build_constraints(model, data):
     # se guardan en el modelo por si otros bloques los necesitan.
     model._lines_in = lines_in
     model._lines_out = lines_out
+    
+    # --- Construccion efectiva de cada linea -------------------------
+    # Enfoque UNIFICADO: las lineas existentes se tratan como candidatas
+    # ya construidas. x_eff(l) vale la variable binaria x_l si la linea
+    # es candidata (l in LC), o la constante 1 si es existente (l in L).
+    # Asi las restricciones de red se escriben una sola vez sobre L_ALL:
+    # para existentes el Big-M nunca relaja (x_eff=1); para candidatas se
+    # relaja si no se construyen (x_eff=0 -> flujo y perdidas forzados a 0).
+    def x_eff(l):
+        return model.x_l[l] if l in model.LC else 1
+ 
+    # Big-M fisico por linea: maxima diferencia posible entre el flujo y
+    # el termino B*(delta+ - delta-). Se acota por la capacidad de la
+    # linea (flujo maximo). Valor FISICO, no 1e20 (evita inestabilidad).
+    def big_m(l):
+        return model.flow_max[l]
 
     # ==================================================================
     # Bloque 1 -- DC-OPF basico
@@ -94,7 +111,7 @@ def build_constraints(model, data):
     ren_en_nodo = getattr(data, "ren_en_nodo", {})   # {nodo: [renovable]}
     bess_en_nodo = getattr(data, "bess_en_nodo", {}) # {nodo: [bess]}
     # get = getattr pero para diccionarios
-    #Mira qué generadores hay en la ciudad n. Si no hay ninguno, 
+    # Mira qué generadores hay en la ciudad n. Si no hay ninguno, 
     # la suma es cero. Si hay generadores, ve uno por uno, 
     # busca cuánta potencia está produciendo cada uno en la hora t, 
     # suma todos esos valores y guarda el total en la variable gen
@@ -106,21 +123,54 @@ def build_constraints(model, data):
                    for s in bess_en_nodo.get(n, []))
         entra = sum(m.f[l, t] for l in lines_in[n])
         sale = sum(m.f[l, t] for l in lines_out[n])
+        # medio-perdidas de todas las lineas conectadas al nodo (la otra
+        # mitad la cubre el nodo del otro extremo). Tesis: 0.5*sum Ploss.
+        perdidas = 0.5 * sum(m.Ploss[l, t]
+                             for l in (lines_in[n] + lines_out[n]))
         return (gen + hid + ren + bess + entra
-                == m.D[n, t] + sale)
+                == m.D[n, t] + sale + perdidas)
     model.balance_nodal = pyo.Constraint(
         model.N, model.T, rule=balance_nodal_rule)
 
-    # --- 1.2 Flujo DC en lineas existentes ---------------------------
-    # f[l,t] = MVA_base * B[l] * (theta_i - theta_j)
-    # Solo lineas existentes (L). Las candidatas (LC) se rigen por el
-    # Bloque 6 (expansion con Big-M).
-    def flujo_dc_rule(m, l, t):
+    # --- 1.2 Descomposicion angular + Flujo DC (unificado L_ALL) ------
+    # La diferencia angular (theta_i - theta_j) se descompone en parte
+    # positiva y negativa:  theta_i - theta_j = delta_pos - delta_neg.
+    # Esta descomposicion se comparte con las perdidas (Bloque 2), que
+    # usan el valor absoluto |theta_i - theta_j| = delta_pos + delta_neg.
+    # El solver fuerza una de las dos a cero porque las perdidas tienen
+    # costo implicito (mecanismo auto-consistente de Alguacil).    
+    # La diferencia angular se descompone en parte positiva y negativa.
+    # Para lineas CANDIDATAS, la igualdad se relaja con Big-M: solo se
+    # cumple si la linea se construye (x_eff=1). Para existentes (x_eff=1
+    # fijo) el termino Big-M*(1-1)=0, asi que la igualdad es exacta.
+    # Se escribe como dos desigualdades (relajacion Big-M bilateral):
+    #   -M(1-x) <= (theta_i - theta_j) - (delta+ - delta-) <= M(1-x)
+    def desc_ang_sup_rule(m, l, t):
         i = data.linea_from[l]
         j = data.linea_to[l]
+        return ((m.theta[i, t] - m.theta[j, t])
+                - (m.delta_pos[l, t] - m.delta_neg[l, t])
+                <= big_m(l) * (1 - x_eff(l)))
+    model.desc_ang_sup = pyo.Constraint(
+        model.L_ALL, model.T, rule=desc_ang_sup_rule)
+    
+    def desc_ang_inf_rule(m, l, t):
+        i = data.linea_from[l]
+        j = data.linea_to[l]
+        return ((m.theta[i, t] - m.theta[j, t])
+                - (m.delta_pos[l, t] - m.delta_neg[l, t])
+                >= -big_m(l) * (1 - x_eff(l)))
+    model.desc_ang_inf = pyo.Constraint(
+        model.L_ALL, model.T, rule=desc_ang_inf_rule)
+ 
+    # Flujo DC usando la descomposicion:
+    # Flujo DC (sobre L_ALL): f = MVA * B * (delta+ - delta-)
+    #   f = MVA_base * B * (delta_pos - delta_neg)    
+    def flujo_dc_rule(m, l, t):
         return m.f[l, t] == (m.MVA_base * m.susceptance[l]
-                             * (m.theta[i, t] - m.theta[j, t]))
-    model.flujo_dc = pyo.Constraint(model.L, model.T, rule=flujo_dc_rule)
+                             * (m.delta_pos[l, t] - m.delta_neg[l, t]))
+    model.flujo_dc = pyo.Constraint(
+        model.L_ALL, model.T, rule=flujo_dc_rule)
 
     # --- 1.3 Nodo de referencia (slack) ------------------------------
     # El angulo del nodo de referencia se fija en 0 (los angulos son
@@ -129,29 +179,195 @@ def build_constraints(model, data):
         return m.theta[m.nodo_ref, t] == 0
     model.ref_angular = pyo.Constraint(model.T, rule=slack_rule)
 
-    # --- 1.4 Limites de flujo de linea -------------------------------
-    # -Fmax <= f <= Fmax  (sin perdidas aqui; el medio-Ploss del Cap. 3
-    # se anade en el Bloque 2). Solo lineas existentes por ahora.
+    # --- 1.4 Limites de flujo (sobre L_ALL, con medio-perdidas y x) ---
+    # Tesis (Cap. 3): -Fmax <= f + 0.5*Ploss <= Fmax. Las perdidas se
+    # reparten mitad en cada extremo de la linea. Ploss se define en el
+    # Bloque 2; aqui ya se incluye el termino 0.5*Ploss.    
+    # -Fmax*x <= f + 0.5*Ploss ... y ... -f + 0.5*Ploss <= Fmax*x
+    # Si la candidata no se construye (x=0): el flujo se fuerza a 0 y,
+    # como delta_seg tambien se anula (ver 2.2), Ploss=0.
     def flujo_max_rule(m, l, t):
-        return m.f[l, t] <= m.flow_max[l]
-    model.flujo_max = pyo.Constraint(model.L, model.T, rule=flujo_max_rule)
-
+        return m.f[l, t] + 0.5 * m.Ploss[l, t] <= m.flow_max[l] * x_eff(l)
+    model.flujo_max = pyo.Constraint(
+        model.L_ALL, model.T, rule=flujo_max_rule)
+ 
     def flujo_min_rule(m, l, t):
-        return m.f[l, t] >= -m.flow_max[l]
-    model.flujo_min = pyo.Constraint(model.L, model.T, rule=flujo_min_rule)
+        return -m.f[l, t] + 0.5 * m.Ploss[l, t] <= m.flow_max[l] * x_eff(l)
+    model.flujo_min = pyo.Constraint(
+        model.L_ALL, model.T, rule=flujo_min_rule)
 
-    # --- 1.5 Cota de generacion termica (version minima) -------------
-    # 0 <= P_g <= Pmax. Version simple para que el modelo CIERRE y
-    # resuelva ya. El limite con Pmin y unit commitment (Pmin*u <= Pg)
-    # llega en el Bloque 3/4. Por eso es "minima" y provisional.
-    # TODO: reemplazar por limites con UC (Pmin*u <= Pg <= Pmax*u).
-    def gen_max_rule(m, g, t):
-        return m.P_g[g, t] <= m.Pmax[g]
-    model.gen_max = pyo.Constraint(model.G, model.T, rule=gen_max_rule)
+    # --- 1.5 (eliminada) ---------------------------------------------
+    # La cota provisional 0<=Pg<=Pmax del Bloque 1 fue reemplazada por
+    # las restricciones de generacion con UC del Bloque 3 (pot_min,
+    # pot_max), que son las de la tesis.
+    
+    # ==================================================================
+    # Bloque 2 -- PERDIDAS LINEALIZADAS (Alguacil et al., 2003)
+    # ==================================================================
+    # --- 2.1 Suma de bloques = valor absoluto de la dif. angular ------
+    def perd_suma_bloques_rule(m, l, t):
+        return (sum(m.delta_seg[l, k, t] for k in m.SEG_PERD)
+                == m.delta_pos[l, t] + m.delta_neg[l, t])
+    model.perd_suma_bloques = pyo.Constraint(
+        model.L_ALL, model.T, rule=perd_suma_bloques_rule)
 
+    # --- 2.2 Cota de cada bloque -------------------------------------
+    # delta_seg <= delta_theta * x_eff. Para existentes (x_eff=1) es la
+    # cota normal. Para candidatas NO construidas (x_eff=0) fuerza
+    # delta_seg=0 -> suma de bloques=0 -> Ploss=0. Asi una linea que no
+    # existe no tiene perdidas (clave del enfoque, cf. Zhang 2012).
+    import math
+    # Δδ = 20°= π/9 rad
+    # Es el tamaño máximo de cada bloque de la linealizacion de perdidas.
+    # Conversión de grados a radianes
+    delta_theta = 20 * math.pi / 180
+        
+    def perd_bloque_max_rule(m, l, k, t):
+        return m.delta_seg[l, k, t] <= delta_theta * x_eff(l)
+    model.perd_bloque_max = pyo.Constraint(
+        model.L_ALL, model.SEG_PERD, model.T, rule=perd_bloque_max_rule)
+
+    # --- 2.3 Calculo de las perdidas ---------------------------------
+    # Las pérdidas se calculan sumando el aporte de cada bloque, 
+    # escalado por la conductancia
+    # Ploss = MVA·G·Σ(α·delta_seg)
+    # Ploss = MVA * G^L * sum_k alpha[k] * delta_seg[l,k,t]
+    def perd_calculo_rule(m, l, t):
+        return m.Ploss[l, t] == (
+            m.MVA_base * m.conductance[l]
+            * sum(m.alpha[k] * m.delta_seg[l, k, t] for k in m.SEG_PERD))
+    model.perd_calculo = pyo.Constraint(
+        model.L_ALL, model.T, rule=perd_calculo_rule)
+ 
     # ==================================================================
-    # TODO -- Bloques 2-6 (perdidas, generacion completa, UC, BESS,
-    # expansion) y FACTS. Se anaden incrementalmente.
+    # Bloque 3 -- GENERACION TERMICA (limites + conexion con el costo)
     # ==================================================================
+    # Estas restricciones CONECTAN la potencia generada Pg con las
+    # variables que cuestan (u, dP_seg). Sin ellas el costo da 0.
+    # Formulacion identica a la tesis (Cap. 3) y a Avendano.
+ 
+    # --- 3.1 Composicion de la potencia (la pieza que activa el costo)-
+    # Pg,t = Pgmin*u + SUM_m dP_seg[g,m,t]
+    # La generacion = minimo tecnico (si esta encendida) + aportes de
+    # cada segmento de la linealizacion de costo.
+    def pot_compuesta_rule(m, g, t):
+        return m.P_g[g, t] == (m.Pmin[g] * m.u[g, t]
+                               + sum(m.dP_seg[g, mm, t]
+                                     for mm in m.SEG_COST))
+    model.pot_compuesta = pyo.Constraint(
+        model.G, model.T, rule=pot_compuesta_rule)
+ 
+    # --- 3.2 Limite minimo con unit commitment -----------------------
+    # Pg,t >= Pgmin * u   (si esta apagada, Pg=0; si encendida, >= Pmin)
+    def pot_min_rule(m, g, t):
+        return m.P_g[g, t] >= m.Pmin[g] * m.u[g, t]
+    model.pot_min = pyo.Constraint(model.G, model.T, rule=pot_min_rule)
+ 
+    # --- 3.3 Limite maximo con unit commitment -----------------------
+    # Pg,t <= Pgmax * u
+    def pot_max_rule(m, g, t):
+        return m.P_g[g, t] <= m.Pmax[g] * m.u[g, t]
+    model.pot_max = pyo.Constraint(model.G, model.T, rule=pot_max_rule)
+ 
+    # --- 3.4 Ancho de cada segmento de costo -------------------------
+    # 0 <= dP_seg[g,m,t] <= deltaP_g * u
+    # Cada segmento aporta como maximo el ancho del tramo (deltaP_g), y
+    # solo si la unidad esta encendida. deltaP_g = (Pmax-Pmin)/M, igual
+    # que en la linealizacion de costo (tesis: ancho de segmento igual).
+    n_seg = len(model.SEG_COST)
+ 
+    def seg_max_rule(m, g, mm, t):
+        delta_p = (m.Pmax[g] - m.Pmin[g]) / n_seg
+        return m.dP_seg[g, mm, t] <= delta_p * m.u[g, t]
+    model.seg_max = pyo.Constraint(
+        model.G, model.SEG_COST, model.T, rule=seg_max_rule)
+ 
+    # ==================================================================
+    # Bloque 4 -- UNIT COMMITMENT (logica de arranque/parada)
+    # ==================================================================
+    # Formulacion TIGHT de 3 binarias (u, SU, SD), la mas eficiente para
+    # el solver (Morales-Espana et al.; misma que usa Avendano).
+    # nota-python: T.first() y T.prev(t) dan el primer periodo y el
+    # anterior, respetando el orden del conjunto.
+ 
+    # --- 4.1 Consistencia arranque/parada vs cambio de estado --------
+    # SU[g,t] - SD[g,t] = u[g,t] - u[g,t-1]
+    # Si la unidad pasa de OFF a ON -> SU=1; de ON a OFF -> SD=1.
+    # En el primer periodo se usa el estado inicial onoff_t0.
+    # Esta es la restriccion que hace la formulacion "tight".
+    def uc_consistencia_rule(m, g, t):
+        if t == m.T.first():
+            previo = m.onoff_t0[g]
+        else:
+            previo = m.u[g, m.T.prev(t)]
+        return m.SU[g, t] - m.SD[g, t] == m.u[g, t] - previo
+    model.uc_consistencia = pyo.Constraint(
+        model.G, model.T, rule=uc_consistencia_rule)
+ 
+    # --- 4.2 No arrancar y parar en el mismo periodo -----------------
+    # SU[g,t] + SD[g,t] <= 1
+    def uc_excluyente_rule(m, g, t):
+        return m.SU[g, t] + m.SD[g, t] <= 1
+    model.uc_excluyente = pyo.Constraint(
+        model.G, model.T, rule=uc_excluyente_rule)
+ 
+    # --- 4.3 Tiempo minimo de ENCENDIDO ------------------------------
+    # Si la unidad arranco en algun momento de las ultimas L_up_min
+    # horas, debe seguir encendida ahora:
+    #   sum_{tau = t-L_up_min+1 .. t} SU[g,tau] <= u[g,t]
+    def min_up_rule(m, g, t):
+        lmin = m.L_up_min[g]
+        ventana = [tau for tau in m.T if t - lmin + 1 <= tau <= t]
+        return sum(m.SU[g, tau] for tau in ventana) <= m.u[g, t]
+    model.min_up = pyo.Constraint(model.G, model.T, rule=min_up_rule)
+ 
+    # --- 4.4 Tiempo minimo de APAGADO --------------------------------
+    # Si la unidad paro en las ultimas L_down_min horas, debe seguir
+    # apagada ahora:
+    #   sum_{tau = t-L_down_min+1 .. t} SD[g,tau] <= 1 - u[g,t]
+    def min_down_rule(m, g, t):
+        lmin = m.L_down_min[g]
+        ventana = [tau for tau in m.T if t - lmin + 1 <= tau <= t]
+        return sum(m.SD[g, tau] for tau in ventana) <= 1 - m.u[g, t]
+    model.min_down = pyo.Constraint(model.G, model.T, rule=min_down_rule)
+ 
+    # --- 4.5 Rampa de SUBIDA (con arranque) --------------------------
+    # Formulacion de la tesis (Morales-Espana et al., 2013):
+    #   Pg,t - Pg,t-1 <= Rg^up + SUg,t * Pgmin
+    # El termino SUg,t*Pgmin da un margen extra justo en el arranque
+    # (la unidad puede saltar hasta su minimo tecnico al encender).
+    def rampa_up_rule(m, g, t):
+        if t == m.T.first():
+            return pyo.Constraint.Skip   # no hay t-1
+        tp = m.T.prev(t)
+        return (m.P_g[g, t] - m.P_g[g, tp]
+                <= m.ramp_up[g] + m.SU[g, t] * m.Pmin[g])
+    model.rampa_up = pyo.Constraint(model.G, model.T, rule=rampa_up_rule)
+ 
+    # --- 4.6 Rampa de BAJADA (con parada) ----------------------------
+    # Formulacion de la tesis:
+    #   Pg,t-1 - Pg,t <= Rg^down + SDg,t * Pgmin
+    def rampa_down_rule(m, g, t):
+        if t == m.T.first():
+            return pyo.Constraint.Skip
+        tp = m.T.prev(t)
+        return (m.P_g[g, tp] - m.P_g[g, t]
+                <= m.ramp_down[g] + m.SD[g, t] * m.Pmin[g])
+    model.rampa_down = pyo.Constraint(
+        model.G, model.T, rule=rampa_down_rule)
+ 
+    # ==================================================================
+    # Bloque 6 -- EXPANSION: nota sobre las candidatas
+    # ==================================================================
+    # No se necesitan restricciones adicionales: el enfoque unificado ya
+    # cubre las candidatas mediante x_eff en los bloques 1 y 2:
+    #   - flujo y descomposicion relajados por Big-M si x=0,
+    #   - limites de flujo y perdidas forzados a 0 si x=0.
+    # El costo de construccion (Cl*x_l) ya esta en objective.py.
+    # (Aqui irian restricciones extra de expansion si las hubiera, p.ej.
+    #  limite al numero total de lineas nuevas.)
+ 
+    # ==================================================================
+    # TODO -- Bloque 5 (BESS) y FACTS.
 
     return model

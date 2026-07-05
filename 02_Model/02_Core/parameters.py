@@ -90,14 +90,14 @@ def build_parameters(model, data):
 
     # Susceptancia de cada linea: b = 1/X.  data.susceptancia es un dict
     # {linea: valor} ya calculado en el data_loader desde la columna x.
-    model.susceptance = pyo.Param(model.L, initialize=data.susceptancia)
+    model.susceptance = pyo.Param(model.L_ALL, initialize=data.susceptancia)
 
     # Conductancia de cada linea: g = R/(R^2+X^2). Se usa en perdidas.
-    model.conductance = pyo.Param(model.L, initialize=data.conductancia)
+    model.conductance = pyo.Param(model.L_ALL, initialize=data.conductancia)
 
     # Capacidad (limite de flujo) de cada linea, en MW. En el W&W es la
     # columna rateA. Limita el flujo en ambos sentidos (+/-).
-    model.flow_max = pyo.Param(model.L, initialize=data.flow_max)
+    model.flow_max = pyo.Param(model.L_ALL, initialize=data.flow_max)
 
     # alpha: coeficientes de los tramos de linealizacion de PERDIDAS.
     # Formula de Alvaro: alpha_k = delta_theta * (2*k - 1), con
@@ -163,6 +163,32 @@ def build_parameters(model, data):
                               initialize=getattr(data, "cost_sd",
                                                  {g: 0 for g in model.G}))
 
+    # --- Parametros de tiempos minimos y estado inicial (UC) ----------
+    # Necesarios para las restricciones de unit commitment (Bloque 4 de
+    # constraints). Defaults NEUTROS: estado inicial apagado (0), y
+    # tiempos minimos de 1 hora (no imponen restriccion real). El W&W no
+    # trae estos datos; el caso colombiano los sobreescribira.
+    # onoff_t0   : estado de la unidad antes del horizonte (0=off, 1=on).
+    # L_up_min   : tiempo minimo de encendido (horas).
+    # L_down_min : tiempo minimo de apagado (horas).
+    # TODO: poblar con datos reales (IniT_ON, Min_ON, Min_OFF) en Colombia.
+    model.onoff_t0 = pyo.Param(
+        model.G, initialize=getattr(data, "onoff_t0",
+                                    {g: 0 for g in model.G}))
+    model.L_up_min = pyo.Param(
+        model.G, initialize=getattr(data, "l_up_min",
+                                    {g: 1 for g in model.G}))
+    model.L_down_min = pyo.Param(
+        model.G, initialize=getattr(data, "l_down_min",
+                                    {g: 1 for g in model.G}))
+ 
+    # --- Costo marginal de generacion hidraulica (tesis: Ch) ----------
+    # Indexado sobre H. En el W&W H esta vacio (no hay hidro), asi que
+    # C_h queda vacio sin error; la funcion objetivo lo suma sobre H y
+    # da 0. Se poblara al migrar al caso colombiano (hoja de hidraulicas).
+    # TODO: poblar costos hidraulicos reales en el caso Colombia.
+    model.C_h = pyo.Param(model.H,
+                          initialize=getattr(data, "costo_hidro", {}))
     # ==================================================================
     # Bloque 4 -- COSTOS DE INVERSION (para la funcion objetivo)
     # ==================================================================
