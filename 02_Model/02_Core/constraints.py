@@ -281,6 +281,28 @@ def build_constraints(model, data):
         return m.dP_seg[g, mm, t] <= delta_p * m.u[g, t]
     model.seg_max = pyo.Constraint(
         model.G, model.SEG_COST, model.T, rule=seg_max_rule)
+    
+    # ==================================================================
+    # Bloque 3b -- GENERACION RENOVABLE (con curtailment)
+    # ==================================================================
+    # Formulacion de la tesis (Forma B): la energia disponible se reparte
+    # entre lo generado (P_r) y lo vertido/desperdiciado (Pcurt).
+    # Permite medir cuanta energia renovable se desaprovecha.
+ 
+    # --- 3b.1 Reparto disponibilidad = generado + vertido ------------
+    # P_r[r,t] + Pcurt[r,t] = disp_renov[r,t]
+    def renov_reparto_rule(m, r, t):
+        return m.P_r[r, t] + m.Pcurt[r, t] == m.disp_renov[r, t]
+    model.renov_reparto = pyo.Constraint(
+        model.R, model.T, rule=renov_reparto_rule)
+ 
+    # --- 3b.2 Limite de generacion renovable -------------------------
+    # 0 <= P_r <= disp_renov (no puede generar mas que lo disponible).
+    # El limite inferior lo da el dominio NonNegativeReals de la variable.
+    def renov_max_rule(m, r, t):
+        return m.P_r[r, t] <= m.disp_renov[r, t]
+    model.renov_max = pyo.Constraint(
+        model.R, model.T, rule=renov_max_rule)
  
     # ==================================================================
     # Bloque 4 -- UNIT COMMITMENT (logica de arranque/parada)
@@ -355,7 +377,116 @@ def build_constraints(model, data):
                 <= m.ramp_down[g] + m.SD[g, t] * m.Pmin[g])
     model.rampa_down = pyo.Constraint(
         model.G, model.T, rule=rampa_down_rule)
+    
+    # ==================================================================
+    # Bloque 5 -- BESS (almacenamiento)
+    # ==================================================================
+    # Formulacion de la tesis (Cap. 3). El BESS opera solo si se instala
+    # (y_s = 1). Todas las restricciones se ligan a esa decision.
  
+    # --- 5.1 Balance de energia (SoC) --------------------------------
+    # SoC[s,t] = SoC[s,t-1]*(1 - self_dis) + eff_ch*Pch - Pdis/eff_dis
+    # En el primer periodo se parte del SoC inicial (fraccion de Esmax).
+    def bess_balance_rule(m, s, t):
+        carga = m.eff_ch * m.Pch[s, t]
+        descarga = m.Pdis[s, t] / m.eff_dis
+        if t == m.T.first():
+            soc_previo = m.soc_ini_frac * m.Esmax[s]
+        else:
+            soc_previo = m.SoC[s, m.T.prev(t)] * (1 - m.self_dis)
+        return m.SoC[s, t] == soc_previo + carga - descarga
+    model.bess_balance = pyo.Constraint(
+        model.S, model.T, rule=bess_balance_rule)
+ 
+    # --- 5.2 Limite de energia almacenada ----------------------------
+    # 0 <= SoC[s,t] <= Esmax[s]  (Esmax es variable de dimensionamiento)
+    def bess_soc_max_rule(m, s, t):
+        return m.SoC[s, t] <= m.Esmax[s]
+    model.bess_soc_max = pyo.Constraint(
+        model.S, model.T, rule=bess_soc_max_rule)
+ 
+    # --- 5.3 Limites de potencia de carga/descarga -------------------
+    # Pch, Pdis limitados por (a) el tamano instalado Psmax y (b) el
+    # estado binario. NOTA: el producto Psmax*u_ch seria BILINEAL (dos
+    # variables) y rompe el MILP. Se LINEALIZA en dos restricciones:
+    #   Pch <= Psmax          (no superar la potencia instalada)
+    #   Pch <= M * u_ch       (cero si no esta en modo carga; M fisico)
+    # El estado binario (u_ch/u_dis) evita cargar y descargar a la vez.
+    M_p = getattr(data, "bess_pot_max", 1000)   # Big-M fisico (MW)
+ 
+    def bess_pch_size_rule(m, s, t):
+        return m.Pch[s, t] <= m.Psmax[s]
+    model.bess_pch_size = pyo.Constraint(
+        model.S, model.T, rule=bess_pch_size_rule)
+ 
+    def bess_pch_bin_rule(m, s, t):
+        return m.Pch[s, t] <= M_p * m.u_ch[s, t]
+    model.bess_pch_bin = pyo.Constraint(
+        model.S, model.T, rule=bess_pch_bin_rule)
+ 
+    def bess_pdis_size_rule(m, s, t):
+        return m.Pdis[s, t] <= m.Psmax[s]
+    model.bess_pdis_size = pyo.Constraint(
+        model.S, model.T, rule=bess_pdis_size_rule)
+ 
+    def bess_pdis_bin_rule(m, s, t):
+        return m.Pdis[s, t] <= M_p * m.u_dis[s, t]
+    model.bess_pdis_bin = pyo.Constraint(
+        model.S, model.T, rule=bess_pdis_bin_rule)
+ 
+    # --- 5.4 No cargar y descargar simultaneamente -------------------
+    # u_ch + u_dis <= y_s  (ademas ligado a la instalacion: si no se
+    # instala el BESS, ni carga ni descarga).
+    def bess_no_simultaneo_rule(m, s, t):
+        return m.u_ch[s, t] + m.u_dis[s, t] <= m.y_s[s]
+    model.bess_no_simultaneo = pyo.Constraint(
+        model.S, model.T, rule=bess_no_simultaneo_rule)
+ 
+    # --- 5.5 Dimensionamiento ligado a la instalacion ----------------
+    # Psmax, Esmax solo pueden ser > 0 si el BESS se instala (y_s = 1).
+    # Big-M fisico: una cota superior razonable a la potencia/energia.
+    M_pot = getattr(data, "bess_pot_max", 1000)   # MW, cota fisica
+    M_ene = getattr(data, "bess_ene_max", 5000)   # MWh, cota fisica
+ 
+    def bess_inst_pot_rule(m, s):
+        return m.Psmax[s] <= M_pot * m.y_s[s]
+    model.bess_inst_pot = pyo.Constraint(
+        model.S, rule=bess_inst_pot_rule)
+ 
+    def bess_inst_ene_rule(m, s):
+        return m.Esmax[s] <= M_ene * m.y_s[s]
+    model.bess_inst_ene = pyo.Constraint(
+        model.S, rule=bess_inst_ene_rule)
+ 
+    # --- 5.6 Estado final = estado inicial ---------------------------
+    # SoC[s, ultimo periodo] = SoC inicial. Evita que el BESS haga
+    # "trampa" vaciandose al final del horizonte. (Mejora de la tesis
+    # que Alvaro no tiene.)
+    def bess_ciclico_rule(m, s):
+        return (m.SoC[s, m.T.last()]
+                == m.soc_ini_frac * m.Esmax[s])
+    model.bess_ciclico = pyo.Constraint(model.S, rule=bess_ciclico_rule)
+ 
+    # --- 5.7 Limite del numero de BESS instalados --------------------
+    # sum_s y_s <= N_BESS
+    def bess_num_max_rule(m):
+        if len(m.S) == 0:
+            return pyo.Constraint.Skip   # sin BESS, restriccion trivial
+        return sum(m.y_s[s] for s in m.S) <= m.N_BESS
+    model.bess_num_max = pyo.Constraint(rule=bess_num_max_rule)
+    
+    # --- 5.8 Relacion potencia-energia (duracion nominal) ------------
+    # Es <= rho * Ps. Relaciona la energia instalada con la potencia
+    # instalada mediante la duracion nominal rho (horas). Evita
+    # configuraciones irreales (mucha energia con poca potencia).
+    # Tesis: Es <= rho * Ps (Alsaidan et al., 2018).
+    rho = getattr(data, "bess_duracion", 4)   # duracion nominal (horas)
+
+    def bess_pot_energia_rule(m, s):
+        return m.Esmax[s] <= rho * m.Psmax[s]
+    model.bess_pot_energia = pyo.Constraint(
+        model.S, rule=bess_pot_energia_rule)
+
     # ==================================================================
     # Bloque 6 -- EXPANSION: nota sobre las candidatas
     # ==================================================================
@@ -368,6 +499,6 @@ def build_constraints(model, data):
     #  limite al numero total de lineas nuevas.)
  
     # ==================================================================
-    # TODO -- Bloque 5 (BESS) y FACTS.
+    # TODO -- FACTS (pendiente de linealizacion del TCSC).
 
     return model

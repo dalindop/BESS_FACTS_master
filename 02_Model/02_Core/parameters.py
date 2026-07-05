@@ -124,6 +124,17 @@ def build_parameters(model, data):
     # cambia el dict data.demanda que entrega el loader.
     # note-python: filas = model.N, columnas = model.T. 
     model.D = pyo.Param(model.N, model.T, initialize=data.demanda)
+    
+    # --- Disponibilidad renovable (tesis: Ar,t * Pr^max) --------------
+    # Energia maxima que el recurso renovable r puede entregar en la hora
+    # t (MW). Ya incorpora el factor de disponibilidad del recurso (sol,
+    # viento) y la capacidad instalada. En el W&W R esta vacio, asi que
+    # queda vacio sin error. En Colombia se puebla con perfiles de
+    # generacion solar/eolica (analogo a la hoja Renewable de Alvaro).
+    model.disp_renov = pyo.Param(
+        model.R, model.T,
+        initialize=getattr(data, "disponibilidad_renov", {}),
+        default=0)
 
     # ==================================================================
     # Bloque 3 -- parametros de GENERACION TERMICA
@@ -247,6 +258,33 @@ def build_parameters(model, data):
     model.Cf_size = pyo.Param(
         initialize=getattr(data, "costo_facts_size", 0))
 
+    # --- Parametros TECNICOS del BESS (para las restricciones) --------
+    # Valores por defecto tomados de Alvaro (hoja ESS_Unit del sistema
+    # colombiano): eficiencias de carga/descarga = 0.9, autodescarga =
+    # 0.00625, SOC inicial = 0.05 (fraccion de la energia instalada).
+    # Son escalares (iguales para todos los BESS). Al migrar a Colombia
+    # pueden volverse indexados por s si cada BESS difiere.
+    #   eff_ch  : eficiencia de carga (tesis: eta^ch).
+    #   eff_dis : eficiencia de descarga (tesis: eta^dis).
+    #   self_dis: tasa de autodescarga por periodo (tesis: eta^sd).
+    #   soc_ini : estado de carga inicial, fraccion de Esmax.
+    # rho: duracion nominal del BESS (horas), relacion energia/potencia.
+    model.bess_rho = pyo.Param(
+        initialize=getattr(data, "bess_duracion", 4))
+    model.eff_ch = pyo.Param(
+        initialize=getattr(data, "bess_eff_ch", 0.9))
+    model.eff_dis = pyo.Param(
+        initialize=getattr(data, "bess_eff_dis", 0.9))
+    model.self_dis = pyo.Param(
+        initialize=getattr(data, "bess_self_dis", 0.00625))
+    model.soc_ini_frac = pyo.Param(
+        initialize=getattr(data, "bess_soc_ini", 0.05))
+ 
+    # Limite maximo de sistemas BESS instalables (tesis: N_BESS).
+    # Por defecto = numero de nodos candidatos (sin restriccion real).
+    model.N_BESS = pyo.Param(
+        initialize=getattr(data, "n_bess_max", len(model.S)))
+ 
     # ==================================================================
     # TODO -- bloques para escalar al sistema colombiano de Alvaro:
     #   - HIDRO     : slope_j, fg_min_j, Q_min, Q_max
