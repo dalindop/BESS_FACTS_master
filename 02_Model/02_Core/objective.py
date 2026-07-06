@@ -103,15 +103,25 @@ def build_objective(model, data):
     #                     + model.Cf_size * model.X_f[f] for f in model.F)
     # Se suma a Z cuando se declaren z_f y X_f. No afecta lo anterior.
     # ------------------------------------------------------------------
+ 
+    # ------------------------------------------------------------------
+    # Termino FACTS: instalacion + compensacion del TCSC
+    # ------------------------------------------------------------------
+    # Suma sobre F (vacio si no hay candidatos -> 0). Cf_inst penaliza
+    # instalar el TCSC. NOTA: el costo por tamano se omite aqui porque
+    # dB_f puede ser negativo (compensacion capacitiva/inductiva) y
+    # restaria costo erroneamente. Para penalizar la magnitud se
+    # requeriria |dB_f| (variable auxiliar); se deja como afinamiento.
+    costo_facts = sum(
+        model.Cf_inst * model.z_f[f] for f in model.F
+    )
 
     # ------------------------------------------------------------------
     # Funcion objetivo total (minimizar)
     # ------------------------------------------------------------------
-    # sense (sentido)
-    # TODO: agregar costo_facts cuando se declare z_f y X_f.
     model.obj = pyo.Objective(
         expr=(costo_termico + costo_hidraulico
-              + costo_transmision + costo_bess),
+              + costo_transmision + costo_bess + costo_facts),
         sense=pyo.minimize
     )
 
