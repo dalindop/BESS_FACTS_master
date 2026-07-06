@@ -162,11 +162,13 @@ def build_constraints(model, data):
                 >= -big_m(l) * (1 - x_eff(l)))
     model.desc_ang_inf = pyo.Constraint(
         model.L_ALL, model.T, rule=desc_ang_inf_rule)
- 
-    # Flujo DC usando la descomposicion:
+
     # Flujo DC (sobre L_ALL): f = MVA * B * (delta+ - delta-)
-    #   f = MVA_base * B * (delta_pos - delta_neg)    
+    # Las lineas con TCSC (conjunto F) se EXCLUYEN aqui: su flujo lo
+    # define facts_flujo (bloque FACTS), que anade el termino psi.
     def flujo_dc_rule(m, l, t):
+        if l in m.F:
+            return pyo.Constraint.Skip
         return m.f[l, t] == (m.MVA_base * m.susceptance[l]
                              * (m.delta_pos[l, t] - m.delta_neg[l, t]))
     model.flujo_dc = pyo.Constraint(
@@ -486,6 +488,116 @@ def build_constraints(model, data):
         return m.Esmax[s] <= rho * m.Psmax[s]
     model.bess_pot_energia = pyo.Constraint(
         model.S, rule=bess_pot_energia_rule)
+    
+    # ==================================================================
+    # ==================================================================
+    # Bloque FACTS (TCSC) -- formulacion 2018 (Big-M, doble nivel)
+    # ==================================================================
+    # El TCSC anade un flujo inducido psi a la linea:  f = B*theta + psi.
+    # psi = dB * theta (susceptancia adicional * angulo), que es bilineal
+    # y se linealiza en DOS niveles, siguiendo Optimal Allocation (2018):
+    #   Nivel 1: Big-M complementario con y_f (direccion de flujo).
+    #   Nivel 2: variable v_f = z_f * theta (binaria*angulo) linealizada.
+    # Nota: F son las lineas candidatas a TCSC. Se asume que F es un
+    # subconjunto de las lineas; el flujo de esas lineas incorpora psi.
+ 
+    thmax = model.theta_max_f   # cota de angulo (para Big-M nivel 2)
+ 
+    # --- F.1 Limites de compensacion condicionados a instalacion -----
+    # dB_min * z_f <= dB_f <= dB_max * z_f
+    # Si no se instala (z_f=0), la susceptancia adicional es 0.
+    def facts_comp_min_rule(m, f):
+        return m.dB_f[f] >= m.dB_min[f] * m.z_f[f]
+    model.facts_comp_min = pyo.Constraint(
+        model.F, rule=facts_comp_min_rule)
+ 
+    def facts_comp_max_rule(m, f):
+        return m.dB_f[f] <= m.dB_max[f] * m.z_f[f]
+    model.facts_comp_max = pyo.Constraint(
+        model.F, rule=facts_comp_max_rule)
+ 
+    # --- F.2 Nivel 2: v_f = z_f * theta (linealizacion binaria*angulo)-
+    # Ecs. (11)-(12) del paper 2018:
+    #   -theta_max*z_f <= v_f <= theta_max*z_f
+    #   theta - (1-z_f)*theta_max <= v_f <= theta + (1-z_f)*theta_max
+    # Si z_f=1 -> v_f = theta; si z_f=0 -> v_f = 0.
+    def facts_v_bound1_rule(m, f, t):
+        return m.v_f[f, t] >= -thmax * m.z_f[f]
+    model.facts_v_bound1 = pyo.Constraint(
+        model.F, model.T, rule=facts_v_bound1_rule)
+ 
+    def facts_v_bound2_rule(m, f, t):
+        return m.v_f[f, t] <= thmax * m.z_f[f]
+    model.facts_v_bound2 = pyo.Constraint(
+        model.F, model.T, rule=facts_v_bound2_rule)
+ 
+    def facts_v_bound3_rule(m, f, t):
+        i = data.linea_from[f]
+        j = data.linea_to[f]
+        th = m.theta[i, t] - m.theta[j, t]
+        return m.v_f[f, t] >= th - (1 - m.z_f[f]) * thmax
+    model.facts_v_bound3 = pyo.Constraint(
+        model.F, model.T, rule=facts_v_bound3_rule)
+ 
+    def facts_v_bound4_rule(m, f, t):
+        i = data.linea_from[f]
+        j = data.linea_to[f]
+        th = m.theta[i, t] - m.theta[j, t]
+        return m.v_f[f, t] <= th + (1 - m.z_f[f]) * thmax
+    model.facts_v_bound4 = pyo.Constraint(
+        model.F, model.T, rule=facts_v_bound4_rule)
+ 
+    # --- F.3 Nivel 1: psi = dB * v (Big-M complementario) ------------
+    # Ecs. (13)-(14) del paper 2018, con v_f en lugar de z_f*theta:
+    #   -M*y + v*dB_min <= psi <= v*dB_max + M*y
+    #   -M*(1-y) + v*dB_max <= psi <= v*dB_min + M*(1-y)
+    # y_f es la direccion del flujo. Solo una pareja de cotas esta activa.
+    M = model.M_facts
+ 
+    def facts_psi_1_rule(m, f, t):
+        return (m.psi_f[f, t]
+                >= -M * m.y_f[f, t] + m.v_f[f, t] * m.dB_min[f])
+    model.facts_psi_1 = pyo.Constraint(
+        model.F, model.T, rule=facts_psi_1_rule)
+ 
+    def facts_psi_2_rule(m, f, t):
+        return (m.psi_f[f, t]
+                <= m.v_f[f, t] * m.dB_max[f] + M * m.y_f[f, t])
+    model.facts_psi_2 = pyo.Constraint(
+        model.F, model.T, rule=facts_psi_2_rule)
+ 
+    def facts_psi_3_rule(m, f, t):
+        return (m.psi_f[f, t]
+                >= -M * (1 - m.y_f[f, t]) + m.v_f[f, t] * m.dB_max[f])
+    model.facts_psi_3 = pyo.Constraint(
+        model.F, model.T, rule=facts_psi_3_rule)
+ 
+    def facts_psi_4_rule(m, f, t):
+        return (m.psi_f[f, t]
+                <= m.v_f[f, t] * m.dB_min[f] + M * (1 - m.y_f[f, t]))
+    model.facts_psi_4 = pyo.Constraint(
+        model.F, model.T, rule=facts_psi_4_rule)
+ 
+    # --- F.4 Flujo de la linea con TCSC: f = B*theta + psi -----------
+    # Sobrescribe el flujo DC de las lineas con TCSC anadiendo psi. Como
+    # el flujo base ya se define en el bloque 1 (f = MVA*B*(dp-dn)), aqui
+    # se anade el termino psi mediante una restriccion adicional que
+    # relaciona el flujo con el efecto del TCSC.
+    # nota: psi ya esta en MW (dB en p.u. * angulo * MVA implicito en
+    # la escala del modelo). Se suma al balance via el flujo de la linea.
+    def facts_flujo_rule(m, f, t):
+        return m.f[f, t] == (m.MVA_base * m.susceptance[f]
+                             * (m.delta_pos[f, t] - m.delta_neg[f, t])
+                             + m.MVA_base * m.psi_f[f, t])
+    model.facts_flujo = pyo.Constraint(
+        model.F, model.T, rule=facts_flujo_rule)
+ 
+    # --- F.5 Limite del numero de dispositivos FACTS -----------------
+    def facts_num_max_rule(m):
+        if len(m.F) == 0:
+            return pyo.Constraint.Skip
+        return sum(m.z_f[f] for f in m.F) <= m.N_FACTS
+    model.facts_num_max = pyo.Constraint(rule=facts_num_max_rule)
 
     # ==================================================================
     # Bloque 6 -- EXPANSION: nota sobre las candidatas
@@ -498,7 +610,4 @@ def build_constraints(model, data):
     # (Aqui irian restricciones extra de expansion si las hubiera, p.ej.
     #  limite al numero total de lineas nuevas.)
  
-    # ==================================================================
-    # TODO -- FACTS (pendiente de linealizacion del TCSC).
-
     return model

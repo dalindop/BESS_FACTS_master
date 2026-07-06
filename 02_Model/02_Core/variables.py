@@ -138,13 +138,21 @@ def build_variables(model, data):
     # ==================================================================
 
     # ==================================================================
-    # TODO -- bloque FACTS (pendiente de decision de linealizacion):
-    #   z_f   : binaria, instalar TCSC en la linea f in F.
-    #   X_f   : continua, nivel de compensacion serie.
-    # La ecuacion de flujo con FACTS (f = B*X_f*(theta_i - theta_j)) es
-    # BILINEAL (producto X_f * theta) -> no MILP. Requiere linealizacion
-    # (Big-M con flujo auxiliar, o niveles discretos) ANTES de declarar
-    # estas variables. No escribir hasta cerrar esa decision en la tesis.
+    # Bloque FACTS (TCSC) -- formulacion 2018 (Big-M, doble nivel)
+    # ==================================================================
+    # z_f    : binaria, instalar TCSC en la linea f (tesis: zf).
+    # dB_f   : continua, susceptancia adicional del TCSC (tesis: dBf).
+    # psi_f  : continua, flujo inducido por el TCSC (tesis: psi_ij,t).
+    #          El flujo de la linea con TCSC es  f = B*theta + psi.
+    # v_f    : auxiliar continua = z_f * theta (2do nivel de linealiz.,
+    #          resuelve el producto binaria*angulo dentro de psi).
+    # y_f    : binaria, direccion del flujo (para el Big-M complementario
+    #          del nivel 1, ecuaciones 9-10 del paper 2018).
+    model.z_f = pyo.Var(model.F, domain=pyo.Binary)
+    model.dB_f = pyo.Var(model.F, domain=pyo.Reals)
+    model.psi_f = pyo.Var(model.F, model.T, domain=pyo.Reals)
+    model.v_f = pyo.Var(model.F, model.T, domain=pyo.Reals)
+    model.y_f = pyo.Var(model.F, model.T, domain=pyo.Binary)
     # ==================================================================
 
     return model
