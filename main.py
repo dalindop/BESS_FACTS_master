@@ -22,11 +22,29 @@ Uso desde la terminal:
 """
 
 import argparse
+import os
+import sys
+from datetime import datetime
+
+# ------------------------------------------------------------------
+# Registrar las subcarpetas del proyecto en el path de Python. Como
+# main.py esta en la RAIZ del repositorio, las carpetas de codigo
+# cuelgan de 02_Model/. _BASE es la carpeta de este archivo (la raiz).
+# ------------------------------------------------------------------
+_BASE = os.path.dirname(os.path.abspath(__file__))
+_MODEL = os.path.join(_BASE, "02_Model")
+for _sub in ["01_Inputs", "02_Core", "03_Solvers",
+             "04_Postprocessing", "05_Utils"]:
+    _ruta = os.path.join(_MODEL, _sub)
+    if _ruta not in sys.path:
+        sys.path.append(_ruta)
+
 import pyomo.environ as pyo
 
-import data_loader
-import model_builder
-import solver_runner
+import data_loader        # esta en 02_Model/01_Inputs
+import model_builder      # esta en 02_Model/02_Core
+import solver_runner      # esta en 02_Model/03_Solvers
+import results_export     # esta en 04_Postprocessing
 
 
 def ejecutar(ruta_caso, solver="highs", horas=None, exportar_lp=False,
@@ -43,6 +61,8 @@ def ejecutar(ruta_caso, solver="highs", horas=None, exportar_lp=False,
     # 1. CARGA
     if verbose:
         print(f"\n[1/4] Cargando datos: {ruta_caso}")
+        print(ruta_caso)
+        print(os.path.exists(ruta_caso))
     datos = data_loader.cargar_datos(ruta_caso)
 
     # recorte opcional del horizonte (util para pruebas rapidas)
