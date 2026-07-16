@@ -88,6 +88,11 @@ def build_objective(model, data):
     crf_linea = _crf(model.tasa_desc, model.vida_linea)
     crf_bess = _crf(model.tasa_desc, model.vida_bess)
     crf_facts = _crf(model.tasa_desc, model.vida_facts)
+    # Factor para llevar la operacion simulada a un año completo.
+    # Un año tiene 8760 h. Si se simulan N_horas, la operacion se
+    # escala por 8760/N_horas. El factor se ajusta AUTOMATICAMENTE al
+    # horizonte elegido (24h, 1 mes, 1 anio), sin fijar 365.
+    factor_anual = 8760.0 / len(model.T)
 
     # ------------------------------------------------------------------
     # Termino TRANSMISION: costo de construir lineas candidatas
@@ -125,8 +130,15 @@ def build_objective(model, data):
     # ------------------------------------------------------------------
     # Funcion objetivo total (minimizar)
     # ------------------------------------------------------------------
+    # La operacion (termico + hidraulico) corresponde a las horas
+    # simuladas; se escala a un anio con factor_anual para ser
+    # coherente con la inversion anualizada (CRF). Asi todos los
+    # terminos quedan en escala anual y son comparables.
+    costo_operacion_anual = factor_anual * (
+        costo_termico + costo_hidraulico)
+
     model.obj = pyo.Objective(
-        expr=(costo_termico + costo_hidraulico
+        expr=(costo_operacion_anual
               + costo_transmision + costo_bess + costo_facts),
         sense=pyo.minimize
     )

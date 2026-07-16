@@ -303,11 +303,16 @@ def build_parameters(model, data):
     model.tasa_desc = pyo.Param(
         initialize=getattr(data, "tasa_descuento", 0.115))
     model.vida_linea = pyo.Param(
-        initialize=getattr(data, "vida_linea", 30))
+        initialize=getattr(data, "vida_linea", 25))
     model.vida_bess = pyo.Param(
         initialize=getattr(data, "vida_bess", 15))
     model.vida_facts = pyo.Param(
         initialize=getattr(data, "vida_facts", 20))
+    # Factor para llevar la operacion simulada a un anio completo.
+    # Si simulo 1 dia (24h) representativo, factor = 365.
+    # En general: 8760 / horas_simuladas.
+    model.factor_anual = pyo.Param(
+        initialize=getattr(data, "factor_anual", 365))
  
     # ==================================================================
     # TODO -- bloques para escalar al sistema colombiano de Alvaro:
