@@ -102,12 +102,14 @@ def cargar_datos(ruta_excel):
     d.mva_base = cfg.get("S_base", 100)
     d.n_horas = int(cfg.get("horizonte", 24))
     d.n_seg_costo = int(cfg.get("n_seg_costo", 3))
+    d.n_seg_perdidas = int(cfg.get("n_seg_perdidas", 3))
+    d.incluir_perdidas = int(cfg.get("incluir_perdidas", 1))   # <-- NUEVO
+    d.mip_gap = cfg.get("mip_gap", 0.01)
     # Costo base por p.u. de reactancia (para costo de lineas
     # proporcional a reactancia, Alguacil). Configurable.
-    d.costo_base_reactancia = float(
-        cfg.get("costo_base_reactancia", 5.0e7))
+    # d.costo_base_reactancia = float(
+    #     cfg.get("costo_base_reactancia", 5.0e7))
     d.n_seg_perdidas = int(cfg.get("n_seg_perdidas", 3))
-    d.mip_gap = cfg.get("mip_gap", 0.01)
     d.time_limit = cfg.get("time_limit", 1800)
 
     # ================= Nodos (obligatoria) =======================
@@ -180,6 +182,7 @@ def cargar_datos(ruta_excel):
     d.onoff_t0 = {}; d.l_up_min = {}; d.l_down_min = {}
     d.cost_su = {}; d.cost_sd = {}
     d.slope_term = {}; d.fg_min_term = {}
+    d.pg_fijo = {}   # despacho fijo opcional (validacion vs MATPOWER)
     # se importa aqui para linealizar los costos cuadraticos
     import parameters as par
     for g in gens:
@@ -192,9 +195,19 @@ def cargar_datos(ruta_excel):
         d.gen_en_nodo.setdefault(str(g["nodo"]), []).append(gid)
         d.l_up_min[gid] = int(g.get("min_on", 1) or 1)
         d.l_down_min[gid] = int(g.get("min_off", 1) or 1)
-        d.onoff_t0[gid] = 0
         d.cost_su[gid] = float(g.get("cost_su", 0) or 0)
         d.cost_sd[gid] = float(g.get("cost_sd", 0) or 0)
+        if g.get("Pg_fijo") not in (None, ""):
+            valor_fijo = float(g["Pg_fijo"])
+            d.pg_fijo[gid] = valor_fijo
+            # Si el despacho fijo es > 0, el generador debe estar
+            # encendido; se asume estado inicial "ya operando" para
+            # evitar conflicto con la restriccion de tiempo minimo
+            # apagado (valida para el caso de validacion vs MATPOWER,
+            # que representa un estado estacionario, no un arranque).
+            d.onoff_t0[gid] = 1 if valor_fijo > 0 else 0
+        else:
+            d.onoff_t0[gid] = 0
         # linealizar el costo cuadratico c2*P^2+c1*P+c0
         c2 = float(g.get("c2", 0) or 0)
         c1 = float(g.get("c1", 0) or 0)

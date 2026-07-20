@@ -51,6 +51,17 @@ def linealizar_costo(c2, c1, c0, pmin, pmax, n_tramos):
     n_tramos   : numero de tramos rectos (mas tramos = mas preciso).
     """
     fg_min = c2 * pmin**2 + c1 * pmin + c0 #fg_min = Cg_min
+    
+    # Caso especial: Pmin == Pmax (despacho fijo, ej. validacion con
+    # generador forzado a un valor exacto). No hay rango que segmentar;
+    # se usa la pendiente marginal exacta del costo en ese punto
+    # (derivada: C'(P) = 2*c2*P + c1), repetida en todos los tramos
+    # para que la suma de segmentos reproduzca el costo total.
+    if pmax == pmin:
+        pendiente = 2 * c2 * pmin + c1
+        slopes = [pendiente] * n_tramos
+        return fg_min, slopes
+    
     paso = (pmax - pmin) / n_tramos
     slopes = []
     # nota-python: el indice 'm' calca la tesis (segmentos de costo,
@@ -95,6 +106,12 @@ def build_parameters(model, data):
     # Capacidad (limite de flujo) de cada linea, en MW. En el W&W es la
     # columna rateA. Limita el flujo en ambos sentidos (+/-).
     model.flow_max = pyo.Param(model.L_ALL, initialize=data.flow_max)
+    
+    # Flag para incluir o no las perdidas de potencia en el modelo. 
+    # Por defecto = 1 (con perdidas). Para validacion DC se pone 0 (sin perdidas). 
+    model.incluir_perdidas = pyo.Param(
+        initialize=getattr(data, "incluir_perdidas", 1),
+        mutable=True)  # 1 = con perdidas (normal), 0 = sin perdidas (validacion DC)
 
     # alpha: coeficientes de los tramos de linealizacion de PERDIDAS.
     # Formula de Alvaro: alpha_k = delta_theta * (2*k - 1), con
@@ -222,8 +239,9 @@ def build_parameters(model, data):
     # Aparece como Cl * x_l. Solo aplica a lineas candidatas (LC).
     # El caso W&W no trae este dato (LC vacio): queda como placeholder.
     #       (p. ej. UPME, literatura de TEP, costo por km * longitud).
-    model.Cl = pyo.Param(model.LC,
-                         initialize=getattr(data, "costo_linea", {}))
+    # model.Cl = pyo.Param(model.LC,
+    #                       initialize=getattr(data, "costo_linea", {}))
+    # Eliminado: sin lineas candidatas, no se necesita su costo.
 
     # --- Costos del BESS ----------------------------------------------
     # Tres componentes
@@ -298,16 +316,16 @@ def build_parameters(model, data):
         initialize=getattr(data, "n_facts_max", len(model.F)))
     
     # --- Parametros para ANUALIZAR las inversiones (CRF) ------------
-    # tasa_desc  : tasa de descuento (ej. 0.10 = 10%)
+    # tasa_desc  : tasa de descuento (ej. 0.115 = 11.5%)
     # vida_*     : vida util de cada tecnologia (anios)
     model.tasa_desc = pyo.Param(
-        initialize=getattr(data, "tasa_descuento", 0.115))
-    model.vida_linea = pyo.Param(
-        initialize=getattr(data, "vida_linea", 25))
+        initialize=getattr(data, "tasa_descuento", 0.115)) # CREG / Luburic usa 5%
+    # model.vida_linea = pyo.Param(
+    #     initialize=getattr(data, "vida_linea", 25))
     model.vida_bess = pyo.Param(
-        initialize=getattr(data, "vida_bess", 15))
+        initialize=getattr(data, "vida_bess", 15)) # años, Kim et al. 2018
     model.vida_facts = pyo.Param(
-        initialize=getattr(data, "vida_facts", 20))
+        initialize=getattr(data, "vida_facts", 20)) # años, Optimal Allocation FACTS 2018
     # Factor para llevar la operacion simulada a un anio completo.
     # Si simulo 1 dia (24h) representativo, factor = 365.
     # En general: 8760 / horas_simuladas.

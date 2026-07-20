@@ -62,7 +62,7 @@ def exportar_resultados(model, ruta_salida, valor_objetivo=None):
 
     # ================= Hoja RESUMEN =============================
     ws = wb.active; ws.title = "Resumen"
-    lineas_c = [l for l in model.LC if pyo.value(model.x_l[l]) > 0.5]
+    # lineas_c = [l for l in model.L_ALL if pyo.value(model.x_l[l]) > 0.5]
     bess_i = [s for s in model.S if pyo.value(model.y_s[s]) > 0.5]
     facts_i = [f for f in model.F if pyo.value(model.z_f[f]) > 0.5]
     perd_tot = sum(pyo.value(model.Ploss[l, t])
@@ -73,7 +73,7 @@ def exportar_resultados(model, ruta_salida, valor_objetivo=None):
         ["Costo total optimo (USD)", round(valor_objetivo, 2)],
         ["Generacion termica total (MWh)", round(gen_tot, 1)],
         ["Perdidas totales (MWh)", round(perd_tot, 2)],
-        ["Lineas construidas", len(lineas_c)],
+        # ["Lineas construidas", len(lineas_c)],
         ["BESS instalados", len(bess_i)],
         ["FACTS instalados", len(facts_i)],
         ["Horizonte (h)", len(horas)],
@@ -114,8 +114,8 @@ def exportar_resultados(model, ruta_salida, valor_objetivo=None):
     # ================= Hoja INVERSIONES =========================
     ws = wb.create_sheet("Inversiones")
     filas_inv = []
-    for l in lineas_c:
-        filas_inv.append(["Linea", str(l), "construida", ""])
+    # for l in lineas_c:
+    #     filas_inv.append(["Linea", str(l), "construida", ""])
     for s in bess_i:
         ps = round(pyo.value(model.Psmax[s]), 1)
         es = round(pyo.value(model.Esmax[s]), 1)

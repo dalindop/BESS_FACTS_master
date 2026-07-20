@@ -117,7 +117,8 @@ def build_variables(model, data):
     # Bloque 4 -- variables de INVERSION (binarias)
     # ==================================================================
     # Construir o no cada linea candidata. Tesis: x_l, l in LC.
-    model.x_l = pyo.Var(model.LC, domain=pyo.Binary)
+    # ELIMINADA función de la tesis
+    # model.x_l = pyo.Var(model.LC, domain=pyo.Binary)
 
     # Instalar o no BESS en cada nodo candidato. Tesis: y_s, s in S.
     model.y_s = pyo.Var(model.S, domain=pyo.Binary)
