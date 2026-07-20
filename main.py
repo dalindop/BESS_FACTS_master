@@ -89,6 +89,20 @@ def ejecutar(ruta_caso, solver="highs", horas=None, exportar_lp=False,
     if verbose:
         print(f"      {n_var} variables, {n_con} restricciones")
 
+    # 2.5 DESPACHO FIJO (modo validacion vs MATPOWER)
+    # Si el caso trae despacho fijo (columna Pg_fijo), se fijan las
+    # variables P_g y u a esos valores exactos, de modo que el modelo
+    # calcule el flujo de potencia para ese despacho conocido en vez
+    # de optimizar el suyo. Permite comparar contra rundcpf/runpf.
+    pg_fijo = getattr(datos, "pg_fijo", {})
+    if pg_fijo:
+        if verbose:
+            print(f"      [validacion] fijando despacho: {pg_fijo}")
+        for g, valor in pg_fijo.items():
+            for t in modelo.T:
+                modelo.P_g[g, t].fix(valor)
+                modelo.u[g, t].fix(1 if valor > 0 else 0)
+
     # 3. RESUELVE
     if verbose:
         print(f"[3/4] Resolviendo con '{solver}'...")
@@ -134,18 +148,19 @@ def _resumen_solucion(model):
         print(f"    {g}: {pg:7.1f} MW [{estado}]")
 
     # --- decisiones de INVERSION (lo relevante para TEP) ---
-    lineas_construidas = [l for l in model.LC
-                          if pyo.value(model.x_l[l]) > 0.5]
+    # ELIMINADA función de la tesis
+    # lineas_construidas = [l for l in model.LC
+    #                       if pyo.value(model.x_l[l]) > 0.5]
     bess_instalados = [s for s in model.S
                        if pyo.value(model.y_s[s]) > 0.5]
     facts_instalados = [f for f in model.F
                         if pyo.value(model.z_f[f]) > 0.5]
 
     print("\n  Decisiones de inversion (TEP):")
-    if lineas_construidas:
-        print(f"    Lineas construidas : {lineas_construidas}")
-    else:
-        print("    Lineas construidas : ninguna")
+    # if lineas_construidas:
+    #     print(f"    Lineas construidas : {lineas_construidas}")
+    # else:
+    #     print("    Lineas construidas : ninguna")
     if bess_instalados:
         for s in bess_instalados:
             ps = pyo.value(model.Psmax[s]); es = pyo.value(model.Esmax[s])

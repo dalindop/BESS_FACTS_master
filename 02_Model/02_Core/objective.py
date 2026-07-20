@@ -78,68 +78,39 @@ def build_objective(model, data):
         for h in model.H for t in model.T
     )
     
-    # Factor de Recuperacion de Capital: anualiza el CAPEX.
-    def _crf(i, n):
-        i = float(pyo.value(i)); n = float(pyo.value(n))
-        if i <= 0:
-            return 1.0 / n
-        return (i * (1 + i)**n) / ((1 + i)**n - 1)
+    # ================================================================
+    # Prorrateo de la inversion (metodo Kim et al0. 218): 
+    # el CAPEX se divide entre los dias de vida util,
+    # dando un costo por dia. Se multiplica por los dias simulados
+    # para ser coherente con el horizonte de operacion.
+    # Con interés (recuperacion lineal simple).
+    # ================================================================
+    def _crf(r, n):
+        # Factor de Recuperacion de Capital (Qiu et al. 2017;
+        # Zakeri & Syri, 2015). r=tasa, n=vida util en anios.
+        return (r * (1 + r)**n) / ((1 + r)**n - 1)
 
-    crf_linea = _crf(model.tasa_desc, model.vida_linea)
     crf_bess = _crf(model.tasa_desc, model.vida_bess)
     crf_facts = _crf(model.tasa_desc, model.vida_facts)
-    # Factor para llevar la operacion simulada a un año completo.
-    # Un año tiene 8760 h. Si se simulan N_horas, la operacion se
-    # escala por 8760/N_horas. El factor se ajusta AUTOMATICAMENTE al
-    # horizonte elegido (24h, 1 mes, 1 anio), sin fijar 365.
-    factor_anual = 8760.0 / len(model.T)
 
-    # ------------------------------------------------------------------
-    # Termino TRANSMISION: costo de construir lineas candidatas
-    # ------------------------------------------------------------------
-    # Suma sobre LC (vacio en W&W -> 0). x_l es binaria (construir o no).
-    costo_transmision = crf_linea * sum(
-        model.Cl[l] * model.x_l[l] for l in model.LC
-    )
+    dias_simulados = len(model.T) / 24.0
 
-    # ------------------------------------------------------------------
-    # Termino BESS: instalacion + dimensionamiento (potencia y energia)
-    # ------------------------------------------------------------------
-    # Suma sobre S (vacio en W&W -> 0).
-    costo_bess = crf_bess * sum(
-        model.Cs_inst * model.y_s[s]
-        + model.Cs_power * model.Psmax[s]
-        + model.Cs_energy * model.Esmax[s]
+    # Costo anual equivalente (EAC) prorrateado a los dias simulados
+    costo_bess = (dias_simulados / 365.0) * sum(
+        crf_bess * (model.Cs_power * model.Psmax[s]
+                     + model.Cs_energy * model.Esmax[s])
         for s in model.S
     )
 
-    # ------------------------------------------------------------------
-    # Termino FACTS: instalacion + compensacion del TCSC
-    # ------------------------------------------------------------------
-    # Suma sobre F (vacio si no hay candidatos -> 0). Cf_inst penaliza
-    # instalar el TCSC. NOTA: el costo por tamano se omite aqui porque
-    # dB_f puede ser negativo (compensacion capacitiva/inductiva) y
-    # restaria costo erroneamente. Para penalizar la magnitud se
-    # requeriria |dB_f| (variable auxiliar); se deja como afinamiento.
-    costo_facts = crf_facts * sum(
-        model.Cf_inst * model.z_f[f]
-        + model.Cf_size * model.dB_abs[f]
+    costo_facts = (dias_simulados / 365.0) * sum(
+        crf_facts * (model.Cf_inst * model.z_f[f]
+                      + model.Cf_size * model.dB_abs[f])
         for f in model.F
     )
 
-    # ------------------------------------------------------------------
-    # Funcion objetivo total (minimizar)
-    # ------------------------------------------------------------------
-    # La operacion (termico + hidraulico) corresponde a las horas
-    # simuladas; se escala a un anio con factor_anual para ser
-    # coherente con la inversion anualizada (CRF). Asi todos los
-    # terminos quedan en escala anual y son comparables.
-    costo_operacion_anual = factor_anual * (
-        costo_termico + costo_hidraulico)
-
     model.obj = pyo.Objective(
-        expr=(costo_operacion_anual
-              + costo_transmision + costo_bess + costo_facts),
+        expr=(costo_termico + costo_hidraulico
+              + costo_bess + costo_facts),
         sense=pyo.minimize
     )
 

@@ -109,6 +109,7 @@ def resolver(model, data=None, solver="highs", mip_gap=None,
     else:
         try:
             resultados = opt.solve(model)
+            #resultados = opt.solve(model, tee=verbose)
         except RuntimeError as e:
             if "feasible solution was not found" in str(e).lower():
                 return {

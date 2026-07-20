@@ -79,8 +79,9 @@ def build_sets(model, data):
     # ------------------------------------------------------------------
     # Conjuntos TEP / BESS / FACTS
     # ------------------------------------------------------------------
-    model.LC = pyo.Set(initialize=getattr(data, "lineas_cand", []),
-                       ordered=True)   # lineas candidatas (expansion)
+    # ELIMINADA función en la tesis.
+    # model.LC = pyo.Set(initialize=getattr(data, "lineas_cand", []),
+    #                    ordered=True)   # lineas candidatas (expansion)
     model.S = pyo.Set(initialize=getattr(data, "nodos_bess", []),
                       ordered=True)    # nodos candidatos para BESS
     model.F = pyo.Set(initialize=getattr(data, "lineas_facts", []),
@@ -94,7 +95,10 @@ def build_sets(model, data):
     # aqui, una sola vez, evita repetir el concepto en variables.py y
     # constraints.py.
     # Operador | = union de conjuntos (L U LC)
-    model.L_ALL = model.L | model.LC 
+    # model.L_ALL = model.L | model.LC 
+    # L_ALL = lineas existentes (sin candidatas). Se crea como conjunto
+    # nuevo inicializado con los mismos elementos de L.
+    model.L_ALL = pyo.Set(initialize=list(model.L))
 
     # ------------------------------------------------------------------
     # Conjuntos auxiliares de linealizacion

@@ -88,8 +88,11 @@ def build_constraints(model, data):
     # Asi las restricciones de red se escriben una sola vez sobre L_ALL:
     # para existentes el Big-M nunca relaja (x_eff=1); para candidatas se
     # relaja si no se construyen (x_eff=0 -> flujo y perdidas forzados a 0).
+    # ELIMINADA función en la tesis.
+    # def x_eff(l):
+    #     return model.x_l[l] if l in model.LC else 1
     def x_eff(l):
-        return model.x_l[l] if l in model.LC else 1
+        return 1 # sin lineas candidatas: todas las lineas existen siempre
  
     # Big-M fisico por linea: maxima diferencia posible entre el flujo y
     # el termino B*(delta+ - delta-). Se acota por la capacidad de la
@@ -125,8 +128,10 @@ def build_constraints(model, data):
         sale = sum(m.f[l, t] for l in lines_out[n])
         # medio-perdidas de todas las lineas conectadas al nodo (la otra
         # mitad la cubre el nodo del otro extremo). Tesis: 0.5*sum Ploss.
-        perdidas = 0.5 * sum(m.Ploss[l, t]
-                             for l in (lines_in[n] + lines_out[n]))
+        # incluir_perdidas es para activar/desactivar el calculo de perdidas 
+        # (para comparar con el caso sin perdidas). Se multiplica por 0.5
+        perdidas = m.incluir_perdidas * 0.5 * sum(
+            m.Ploss[l, t] for l in (lines_in[n] + lines_out[n]))
         return (gen + hid + ren + bess + entra
                 == m.D[n, t] + sale + perdidas)
     model.balance_nodal = pyo.Constraint(
@@ -189,12 +194,14 @@ def build_constraints(model, data):
     # Si la candidata no se construye (x=0): el flujo se fuerza a 0 y,
     # como delta_seg tambien se anula (ver 2.2), Ploss=0.
     def flujo_max_rule(m, l, t):
-        return m.f[l, t] + 0.5 * m.Ploss[l, t] <= m.flow_max[l] * x_eff(l)
+        return (m.f[l, t] + m.incluir_perdidas * 0.5 * m.Ploss[l, t]
+                <= m.flow_max[l] * x_eff(l))
     model.flujo_max = pyo.Constraint(
         model.L_ALL, model.T, rule=flujo_max_rule)
  
     def flujo_min_rule(m, l, t):
-        return -m.f[l, t] + 0.5 * m.Ploss[l, t] <= m.flow_max[l] * x_eff(l)
+        return (-m.f[l, t] + m.incluir_perdidas * 0.5 * m.Ploss[l, t]
+                <= m.flow_max[l] * x_eff(l))
     model.flujo_min = pyo.Constraint(
         model.L_ALL, model.T, rule=flujo_min_rule)
 
