@@ -16,10 +16,7 @@ ALCANCE DE ESTE PASO (migracion incremental):
     Bloque 2 -> DEMANDA
     Bloque 3 -> TERMICA    (costos linealizados, limites, rampas, UC)    
     Bloque 4 -> costo de inversión
-    Hidro, embalses, renovable y BESS se anaden en pasos posteriores,
-    cuando se escale del IEEE 6-bus (Wood & Wollenberg) al sistema
-    colombiano de Alvaro. Marcados como TODO al final.
-
+    
 FILOSOFIA (acordada con la direccion de tesis):
     - Se migra la FORMULACION de Alvaro (su fisica), NO su codigo.
     - Los datos NO se leen de archivos aqui dentro. Entran ya
@@ -166,7 +163,6 @@ def build_parameters(model, data):
     # se migre al caso colombiano, estos vendran de la hoja SM_Unit.
     # note-python: Para cada generador (g) en mi lista (model.G), 
     # asígnale un costo de 0 en el caso de que getattr no encuentre valor
-    # TODO: poblar UC real (CSU, Min_ON, Min_OFF...) en el caso Colombia.
     model.cost_SU = pyo.Param(model.G,
                               initialize=getattr(data, "cost_su",
                                                  {g: 0 for g in model.G}))
@@ -182,7 +178,6 @@ def build_parameters(model, data):
     # onoff_t0   : estado de la unidad antes del horizonte (0=off, 1=on).
     # L_up_min   : tiempo minimo de encendido (horas).
     # L_down_min : tiempo minimo de apagado (horas).
-    # TODO: poblar con datos reales (IniT_ON, Min_ON, Min_OFF) en Colombia.
     model.onoff_t0 = pyo.Param(
         model.G, initialize=getattr(data, "onoff_t0",
                                     {g: 0 for g in model.G}))
@@ -221,13 +216,11 @@ def build_parameters(model, data):
     #   y luego lo escala por el numero de horas del horizonte.
     #   Esta decision debe replicarse y defenderse en la tesis. Aqui se
     #   asume que los costos que entran ya vienen en la base correcta
-    #   (el data_loader/loader hace la anualizacion).
-    # TODO: fijar y documentar el horizonte de recuperacion (anios_recup).
+    #   (el data_loader/loader hace la anualizacion).    
 
     # --- Costo de construir cada linea candidata (l in LC) ------------
     # Aparece como Cl * x_l. Solo aplica a lineas candidatas (LC).
     # El caso W&W no trae este dato (LC vacio): queda como placeholder.
-    # TODO: valor de referencia de costo de linea [CITA - verificar]
     #       (p. ej. UPME, literatura de TEP, costo por km * longitud).
     model.Cl = pyo.Param(model.LC,
                          initialize=getattr(data, "costo_linea", {}))
@@ -240,30 +233,23 @@ def build_parameters(model, data):
     # Valores por defecto tomados de Alvaro (hoja ESS_Unit: C_Potencia,
     # C_Energia = 45). Cs_inst no existe en Alvaro -> 0 por defecto.
     model.Cs_inst   = pyo.Param(
-        initialize=getattr(data, "costo_bess_inst", 0))
+        initialize=getattr(data, "costo_bess_inst", 0)) # embebido en pot/ener
     model.Cs_power  = pyo.Param(
-        initialize=getattr(data, "costo_bess_power", 45))
+        initialize=getattr(data, "costo_bess_power", 372000)) # USD/MW (NREL 2025)
     model.Cs_energy = pyo.Param(
-        initialize=getattr(data, "costo_bess_energy", 45))
+        initialize=getattr(data, "costo_bess_energy", 241000)) # USD/MWh (NREL 2025)
 
     # --- Costos del FACTS/TCSC ----------------------------------------
     # Dos componentes
     #   Cf_inst : costo fijo por instalar el dispositivo   (asociado z_f)
     #   Cf_size : costo por nivel de compensacion           (asociado X_f)
-    # placeholder hasta respaldarlos con fuentes.
-    # TODO: valores de referencia de costo FACTS/TCSC [CITA - verificar]
-    #       (p. ej. fabricantes, literatura de compensacion serie).
+    
     model.Cf_inst = pyo.Param(
-        initialize=getattr(data, "costo_facts_inst", 0))
+        initialize=getattr(data, "costo_facts_inst", 50000)) #USD/MVAr
     model.Cf_size = pyo.Param(
         initialize=getattr(data, "costo_facts_size", 0))
 
     # --- Parametros TECNICOS del BESS (para las restricciones) --------
-    # Valores por defecto tomados de Alvaro (hoja ESS_Unit del sistema
-    # colombiano): eficiencias de carga/descarga = 0.9, autodescarga =
-    # 0.00625, SOC inicial = 0.05 (fraccion de la energia instalada).
-    # Son escalares (iguales para todos los BESS). Al migrar a Colombia
-    # pueden volverse indexados por s si cada BESS difiere.
     #   eff_ch  : eficiencia de carga (tesis: eta^ch).
     #   eff_dis : eficiencia de descarga (tesis: eta^dis).
     #   self_dis: tasa de autodescarga por periodo (tesis: eta^sd).
@@ -271,14 +257,15 @@ def build_parameters(model, data):
     # rho: duracion nominal del BESS (horas), relacion energia/potencia.
     model.bess_rho = pyo.Param(
         initialize=getattr(data, "bess_duracion", 4))
+    # eficiencias: round-trip 0.85 (NREL 2025) = 0.922 c/u.
     model.eff_ch = pyo.Param(
-        initialize=getattr(data, "bess_eff_ch", 0.9))
+        initialize=getattr(data, "bess_eff_ch", 0.922))
     model.eff_dis = pyo.Param(
-        initialize=getattr(data, "bess_eff_dis", 0.9))
+        initialize=getattr(data, "bess_eff_dis", 0.922))
     model.self_dis = pyo.Param(
-        initialize=getattr(data, "bess_self_dis", 0.00625))
+        initialize=getattr(data, "bess_self_dis", 0.000125)) # 0.0125% por hora
     model.soc_ini_frac = pyo.Param(
-        initialize=getattr(data, "bess_soc_ini", 0.05))
+        initialize=getattr(data, "bess_soc_ini", 0.5))
  
     # Limite maximo de sistemas BESS instalables (tesis: N_BESS).
     # Por defecto = numero de nodos candidatos (sin restriccion real).
@@ -295,25 +282,41 @@ def build_parameters(model, data):
     #   theta_max      : cota del angulo (para el Big-M del nivel 2).
     model.dB_min = pyo.Param(
         model.F, initialize=getattr(data, "facts_dB_min", {}),
-        default=-0.5)
+        default=-0.7)
     model.dB_max = pyo.Param(
         model.F, initialize=getattr(data, "facts_dB_max", {}),
-        default=0.5)
+        default=0.2)
+    # theta_max: cota de diferencia angular con TCSC.
+    # 0.349 rad = pi/9 = 20°, limite de estabilidad.
     model.theta_max_f = pyo.Param(
-        initialize=getattr(data, "facts_theta_max", 0.6))
+        initialize=getattr(data, "facts_theta_max", 0.349))
     # Big-M para las restricciones de linealizacion del TCSC (fisico).
     model.M_facts = pyo.Param(
         initialize=getattr(data, "facts_big_m", 10))
     # Limite maximo de dispositivos FACTS instalables.
     model.N_FACTS = pyo.Param(
         initialize=getattr(data, "n_facts_max", len(model.F)))
+    
+    # --- Parametros para ANUALIZAR las inversiones (CRF) ------------
+    # tasa_desc  : tasa de descuento (ej. 0.10 = 10%)
+    # vida_*     : vida util de cada tecnologia (anios)
+    model.tasa_desc = pyo.Param(
+        initialize=getattr(data, "tasa_descuento", 0.115))
+    model.vida_linea = pyo.Param(
+        initialize=getattr(data, "vida_linea", 25))
+    model.vida_bess = pyo.Param(
+        initialize=getattr(data, "vida_bess", 15))
+    model.vida_facts = pyo.Param(
+        initialize=getattr(data, "vida_facts", 20))
+    # Factor para llevar la operacion simulada a un anio completo.
+    # Si simulo 1 dia (24h) representativo, factor = 365.
+    # En general: 8760 / horas_simuladas.
+    model.factor_anual = pyo.Param(
+        initialize=getattr(data, "factor_anual", 365))
  
     # ==================================================================
     # TODO -- bloques para escalar al sistema colombiano de Alvaro:
     #   - HIDRO     : slope_j, fg_min_j, Q_min, Q_max
-    #   - EMBALSES  : Vmin, Vmax, aportes, vertimiento (spillage)
-    #   - RENOVABLE : perfiles de generacion eolica/solar
-    #   - BESS      : C_potencia, C_energia, eficiencias, SOC_min/ini
     # ==================================================================
 
     return model

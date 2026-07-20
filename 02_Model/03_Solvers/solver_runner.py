@@ -107,7 +107,16 @@ def resolver(model, data=None, solver="highs", mip_gap=None,
     if manager is not None:
         resultados = manager.solve(model, **kwargs)
     else:
-        resultados = opt.solve(model)
+        try:
+            resultados = opt.solve(model)
+        except RuntimeError as e:
+            if "feasible solution was not found" in str(e).lower():
+                return {
+                    "status": "infactible",
+                    "valor_objetivo": None,
+                    "resuelto": False,
+                }
+            raise
     tiempo = time.time() - t0
  
     term = str(resultados.solver.termination_condition)

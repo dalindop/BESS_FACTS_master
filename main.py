@@ -22,15 +22,33 @@ Uso desde la terminal:
 """
 
 import argparse
+import os
+import sys
+from datetime import datetime
+
+# ------------------------------------------------------------------
+# Registrar las subcarpetas del proyecto en el path de Python. Como
+# main.py esta en la RAIZ del repositorio, las carpetas de codigo
+# cuelgan de 02_Model/. _BASE es la carpeta de este archivo (la raiz).
+# ------------------------------------------------------------------
+_BASE = os.path.dirname(os.path.abspath(__file__))
+_MODEL = os.path.join(_BASE, "02_Model")
+for _sub in ["01_Inputs", "02_Core", "03_Solvers",
+             "04_Postprocessing", "05_Utils"]:
+    _ruta = os.path.join(_MODEL, _sub)
+    if _ruta not in sys.path:
+        sys.path.append(_ruta)
+
 import pyomo.environ as pyo
 
-import data_loader
-import model_builder
-import solver_runner
+import data_loader        # esta en 02_Model/01_Inputs
+import model_builder      # esta en 02_Model/02_Core
+import solver_runner      # esta en 02_Model/03_Solvers
+import results_export     # esta en 04_Postprocessing
 
 
 def ejecutar(ruta_caso, solver="highs", horas=None, exportar_lp=False,
-             verbose=True):
+             exportar=False, verbose=True):
     """
     Ejecuta el flujo completo para un caso y devuelve (modelo, salida).
 
@@ -43,7 +61,13 @@ def ejecutar(ruta_caso, solver="highs", horas=None, exportar_lp=False,
     # 1. CARGA
     if verbose:
         print(f"\n[1/4] Cargando datos: {ruta_caso}")
+        print(ruta_caso)
+        print(os.path.exists(ruta_caso))
     datos = data_loader.cargar_datos(ruta_caso)
+    
+    # (calcular una vez, cerca del inicio de ejecutar)
+    nombre_caso = os.path.splitext(os.path.basename(ruta_caso))[0]
+    sello = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # recorte opcional del horizonte (util para pruebas rapidas)
     if horas is not None:
@@ -68,13 +92,29 @@ def ejecutar(ruta_caso, solver="highs", horas=None, exportar_lp=False,
     # 3. RESUELVE
     if verbose:
         print(f"[3/4] Resolviendo con '{solver}'...")
+    # ruta del .lp en 04_Outputs con caso + fecha/hora (si se pide)
+    nombre_caso = os.path.splitext(os.path.basename(ruta_caso))[0]
+    sello = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ruta_lp = os.path.join(
+        _BASE, "04_Outputs",
+        f"modelo_{nombre_caso}_{solver}_{sello}.lp")
+
     salida = solver_runner.resolver(
         modelo, datos, solver=solver, exportar_lp=exportar_lp,
-        ruta_lp=f"modelo_{solver}.lp", verbose=verbose)
+        ruta_lp=ruta_lp, verbose=verbose)
 
     # 4. RESUMEN de la solucion
     if verbose and salida["resuelto"]:
         _resumen_solucion(modelo)
+        
+    # 5. EXPORTAR resultados a Excel (si se pidio)
+    if exportar and salida["resuelto"]:
+        nombre_salida = f"resultados_{nombre_caso}_{sello}.xlsx"
+        ruta_salida = os.path.join(_BASE, "04_Outputs", nombre_salida)
+        results_export.exportar_resultados(
+            modelo, ruta_salida, salida["valor_objetivo"])
+        if verbose:
+            print(f"\n  Exportado a: 04_Outputs/{nombre_salida}")   
 
     return modelo, salida
 
@@ -135,10 +175,12 @@ def main():
                         help="Recorta el horizonte a N horas (pruebas).")
     parser.add_argument("--lp", action="store_true",
                         help="Exporta el modelo a .lp.")
+    parser.add_argument("--export", action="store_true",
+                        help="Exporta los resultados a 04_Outputs.")
     args = parser.parse_args()
 
     ejecutar(args.caso, solver=args.solver, horas=args.horas,
-             exportar_lp=args.lp)
+             exportar_lp=args.lp, exportar=args.export)
 
 
 if __name__ == "__main__":

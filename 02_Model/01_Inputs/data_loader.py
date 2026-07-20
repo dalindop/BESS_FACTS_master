@@ -102,6 +102,10 @@ def cargar_datos(ruta_excel):
     d.mva_base = cfg.get("S_base", 100)
     d.n_horas = int(cfg.get("horizonte", 24))
     d.n_seg_costo = int(cfg.get("n_seg_costo", 3))
+    # Costo base por p.u. de reactancia (para costo de lineas
+    # proporcional a reactancia, Alguacil). Configurable.
+    d.costo_base_reactancia = float(
+        cfg.get("costo_base_reactancia", 5.0e7))
     d.n_seg_perdidas = int(cfg.get("n_seg_perdidas", 3))
     d.mip_gap = cfg.get("mip_gap", 0.01)
     d.time_limit = cfg.get("time_limit", 1800)
@@ -152,7 +156,20 @@ def cargar_datos(ruta_excel):
         d.flow_max[lid] = float(c["capacidad"])
         d.linea_from[lid] = str(c["desde"])
         d.linea_to[lid] = str(c["hasta"])
-        d.costo_linea[lid] = float(c.get("costo", 0) or 0)
+        # Costo de la linea candidata. Dos modos:
+        #  1) Si el Excel trae un costo explicito, se usa ese.
+        #  2) Si no (vacio o 0), se calcula proporcional a la
+        #     reactancia (Alguacil et al. 2003): lineas con mas
+        #     reactancia (mas largas) cuestan mas. Evita necesitar
+        #     distancias geograficas en sistemas de prueba.
+        costo_expl = c.get("costo")
+        if costo_expl is not None and float(costo_expl) > 0:
+            d.costo_linea[lid] = float(costo_expl)
+        else:
+            # costo_base_reactancia: USD por p.u. de reactancia.
+            # se lee de Config; por defecto un valor representativo.
+            cb = getattr(d, "costo_base_reactancia", 5.0e7)
+            d.costo_linea[lid] = cb * x
 
     # ================= Generadores (obligatoria) =================
     gens = _leer_hoja(wb, "Generadores", obligatoria=True)

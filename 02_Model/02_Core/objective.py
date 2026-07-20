@@ -77,12 +77,28 @@ def build_objective(model, data):
         model.C_h[h] * model.P_h[h, t]
         for h in model.H for t in model.T
     )
+    
+    # Factor de Recuperacion de Capital: anualiza el CAPEX.
+    def _crf(i, n):
+        i = float(pyo.value(i)); n = float(pyo.value(n))
+        if i <= 0:
+            return 1.0 / n
+        return (i * (1 + i)**n) / ((1 + i)**n - 1)
+
+    crf_linea = _crf(model.tasa_desc, model.vida_linea)
+    crf_bess = _crf(model.tasa_desc, model.vida_bess)
+    crf_facts = _crf(model.tasa_desc, model.vida_facts)
+    # Factor para llevar la operacion simulada a un año completo.
+    # Un año tiene 8760 h. Si se simulan N_horas, la operacion se
+    # escala por 8760/N_horas. El factor se ajusta AUTOMATICAMENTE al
+    # horizonte elegido (24h, 1 mes, 1 anio), sin fijar 365.
+    factor_anual = 8760.0 / len(model.T)
 
     # ------------------------------------------------------------------
     # Termino TRANSMISION: costo de construir lineas candidatas
     # ------------------------------------------------------------------
     # Suma sobre LC (vacio en W&W -> 0). x_l es binaria (construir o no).
-    costo_transmision = sum(
+    costo_transmision = crf_linea * sum(
         model.Cl[l] * model.x_l[l] for l in model.LC
     )
 
@@ -90,20 +106,13 @@ def build_objective(model, data):
     # Termino BESS: instalacion + dimensionamiento (potencia y energia)
     # ------------------------------------------------------------------
     # Suma sobre S (vacio en W&W -> 0).
-    costo_bess = sum(
+    costo_bess = crf_bess * sum(
         model.Cs_inst * model.y_s[s]
         + model.Cs_power * model.Psmax[s]
         + model.Cs_energy * model.Esmax[s]
         for s in model.S
     )
 
-    # ------------------------------------------------------------------
-    # TODO -- Termino FACTS (ADITIVO, pendiente de linealizacion TCSC):
-    #   costo_facts = sum(model.Cf_inst * model.z_f[f]
-    #                     + model.Cf_size * model.X_f[f] for f in model.F)
-    # Se suma a Z cuando se declaren z_f y X_f. No afecta lo anterior.
-    # ------------------------------------------------------------------
- 
     # ------------------------------------------------------------------
     # Termino FACTS: instalacion + compensacion del TCSC
     # ------------------------------------------------------------------
@@ -112,15 +121,24 @@ def build_objective(model, data):
     # dB_f puede ser negativo (compensacion capacitiva/inductiva) y
     # restaria costo erroneamente. Para penalizar la magnitud se
     # requeriria |dB_f| (variable auxiliar); se deja como afinamiento.
-    costo_facts = sum(
-        model.Cf_inst * model.z_f[f] for f in model.F
+    costo_facts = crf_facts * sum(
+        model.Cf_inst * model.z_f[f]
+        + model.Cf_size * model.dB_abs[f]
+        for f in model.F
     )
 
     # ------------------------------------------------------------------
     # Funcion objetivo total (minimizar)
     # ------------------------------------------------------------------
+    # La operacion (termico + hidraulico) corresponde a las horas
+    # simuladas; se escala a un anio con factor_anual para ser
+    # coherente con la inversion anualizada (CRF). Asi todos los
+    # terminos quedan en escala anual y son comparables.
+    costo_operacion_anual = factor_anual * (
+        costo_termico + costo_hidraulico)
+
     model.obj = pyo.Objective(
-        expr=(costo_termico + costo_hidraulico
+        expr=(costo_operacion_anual
               + costo_transmision + costo_bess + costo_facts),
         sense=pyo.minimize
     )

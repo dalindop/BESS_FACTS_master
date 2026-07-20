@@ -18,10 +18,7 @@ ALCANCE DE ESTE PASO (migracion incremental):
   Bloque 1 -> OPERACION    (despacho, flujo, angulos, perdidas)
   Bloque 2 -> UNIT COMMIT.  (estado on/off, arranque, parada)
   Bloque 3 -> BESS          (carga/descarga, SOC, dimensionamiento)
-  Bloque 4 -> INVERSION     (construir linea x_l, instalar BESS y_s)
-  El bloque FACTS (z_f, X_f) se añade despues, cuando se decida la
-  linealizacion del TCSC (la ecuacion del flujo con FACTS es bilineal
-  y requiere linealizacion antes de declararse). Marcado como TODO.
+  Bloque 4 -> INVERSION     (construir linea x_l, instalar BESS y_s)  
 
 NOTACION: identica a la tabla de variables del Cap. 3 de la tesis.
   Binarias : x_l, y_s, u[g,t], SU[g,t], SD[g,t], u_ch[s,t], u_dis[s,t]
@@ -153,6 +150,7 @@ def build_variables(model, data):
     model.psi_f = pyo.Var(model.F, model.T, domain=pyo.Reals)
     model.v_f = pyo.Var(model.F, model.T, domain=pyo.Reals)
     model.y_f = pyo.Var(model.F, model.T, domain=pyo.Binary)
+    model.dB_abs = pyo.Var(model.F, domain=pyo.NonNegativeReals)
     # ==================================================================
 
     return model

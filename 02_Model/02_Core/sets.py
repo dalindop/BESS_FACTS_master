@@ -79,9 +79,6 @@ def build_sets(model, data):
     # ------------------------------------------------------------------
     # Conjuntos TEP / BESS / FACTS
     # ------------------------------------------------------------------
-    # TODO: poblar LC con las lineas candidatas reales (data_loader).
-    # TODO: poblar S con los nodos candidatos a BESS (data_loader).
-    # TODO: poblar F con las lineas candidatas a FACTS/TCSC (data_loader).
     model.LC = pyo.Set(initialize=getattr(data, "lineas_cand", []),
                        ordered=True)   # lineas candidatas (expansion)
     model.S = pyo.Set(initialize=getattr(data, "nodos_bess", []),

@@ -14,11 +14,11 @@ Se construye POR BLOQUES (validables uno a uno):
   Bloque 1 -> DC-OPF basico : balance nodal, flujo DC, nodo slack,
               limites de flujo, y cota minima de generacion (para que
               el modelo ya resuelva).
-  Bloque 2 -> Perdidas (Alguacil)         [TODO]
-  Bloque 3 -> Generacion: limites, renovable, rampas   [TODO]
-  Bloque 4 -> Unit Commitment (u, SU, SD)              [TODO]
-  Bloque 5 -> BESS                                     [TODO]
-  Bloque 6 -> Expansion de lineas (Big-M)              [TODO]
+  Bloque 2 -> Perdidas (Alguacil)        
+  Bloque 3 -> Generacion: limites, renovable, rampas   
+  Bloque 4 -> Unit Commitment (u, SU, SD)              
+  Bloque 5 -> BESS                                     
+  Bloque 6 -> Expansion de lineas (Big-M)              
 
 BUENAS PRACTICAS aplicadas:
   - lines_in / lines_out PRECOMPUTADOS: el balance nodal consulta dos
@@ -598,6 +598,17 @@ def build_constraints(model, data):
             return pyo.Constraint.Skip
         return sum(m.z_f[f] for f in m.F) <= m.N_FACTS
     model.facts_num_max = pyo.Constraint(rule=facts_num_max_rule)
+    
+    # --- F.6 Valor absoluto de la compensacion (para el costo) -------
+    def facts_abs_pos_rule(m, f):
+        return m.dB_abs[f] >= m.dB_f[f]
+    model.facts_abs_pos = pyo.Constraint(
+        model.F, rule=facts_abs_pos_rule)
+
+    def facts_abs_neg_rule(m, f):
+        return m.dB_abs[f] >= -m.dB_f[f]
+    model.facts_abs_neg = pyo.Constraint(
+        model.F, rule=facts_abs_neg_rule)
 
     # ==================================================================
     # Bloque 6 -- EXPANSION: nota sobre las candidatas
