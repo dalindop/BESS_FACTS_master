@@ -22,6 +22,7 @@ Python: 3.12
 import pyomo.environ as pyo
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
+import math
 
 
 HDR_FILL = PatternFill("solid", start_color="1F4E78")
@@ -46,7 +47,8 @@ def _escribir_tabla(ws, encabezados, filas, titulo, fila_ini=1):
     return r + 1 + len(filas)
 
 
-def exportar_resultados(model, ruta_salida, valor_objetivo=None):
+def exportar_resultados(model, ruta_salida, valor_objetivo=None,
+                         solver=None, tiempo_s=None):
     """
     Exporta la solucion del modelo `model` (ya resuelto) a un Excel.
 
@@ -65,8 +67,16 @@ def exportar_resultados(model, ruta_salida, valor_objetivo=None):
     # lineas_c = [l for l in model.L_ALL if pyo.value(model.x_l[l]) > 0.5]
     bess_i = [s for s in model.S if pyo.value(model.y_s[s]) > 0.5]
     facts_i = [f for f in model.F if pyo.value(model.z_f[f]) > 0.5]
-    perd_tot = sum(pyo.value(model.Ploss[l, t])
-                   for l in model.L_ALL for t in horas)
+    # Si incluir_perdidas=0 (modo validacion DC), las variables Ploss
+    # no participan en el balance ni en los limites de flujo; su valor
+    # calculado (ligado solo a la diferencia angular real) no es
+    # significativo y se reporta como 0 para evitar confusion.
+    incl_perd = pyo.value(model.incluir_perdidas)
+    if incl_perd:
+        perd_tot = sum(pyo.value(model.Ploss[l, t])
+                       for l in model.L_ALL for t in horas)
+    else:
+        perd_tot = 0.0
     gen_tot = sum(pyo.value(model.P_g[g, t])
                   for g in model.G for t in horas)
     filas_res = [
@@ -77,6 +87,9 @@ def exportar_resultados(model, ruta_salida, valor_objetivo=None):
         ["BESS instalados", len(bess_i)],
         ["FACTS instalados", len(facts_i)],
         ["Horizonte (h)", len(horas)],
+        ["Solver utilizado", solver if solver else "N/D"],       # <-- NUEVO
+        ["Tiempo de resolucion (s)",                              # <-- NUEVO
+         round(tiempo_s, 2) if tiempo_s is not None else "N/D"],  # <-- NUEVO
     ]
     _escribir_tabla(ws, ["Indicador", "Valor"], filas_res,
                     "Resumen de la solucion")
@@ -106,10 +119,26 @@ def exportar_resultados(model, ruta_salida, valor_objetivo=None):
     encab = ["hora"] + [str(l) for l in model.L_ALL]
     filas = []
     for t in horas:
-        fila = [t] + [round(pyo.value(model.Ploss[l, t]), 3)
-                      for l in model.L_ALL]
+        if incl_perd:
+            fila = [t] + [round(pyo.value(model.Ploss[l, t]), 3)
+                          for l in model.L_ALL]
+        else:
+            fila = [t] + [0.0 for l in model.L_ALL]
         filas.append(fila)
-    _escribir_tabla(ws, encab, filas, "Perdidas por linea (MW)")
+    titulo_perd = ("Perdidas por linea (MW)" if incl_perd
+                   else "Perdidas por linea (MW) -- No incluidas "
+                        "en el modelo (incluir_perdidas=0)")
+    _escribir_tabla(ws, encab, filas, titulo_perd)
+    
+    # ================= Hoja ANGULOS ============================
+    ws = wb.create_sheet("Angulos")
+    encab = ["hora"] + [str(n) for n in model.N]
+    filas = []
+    for t in horas:
+        fila = [t] + [round(math.degrees(pyo.value(model.theta[n, t])), 4)
+                    for n in model.N]
+        filas.append(fila)
+    _escribir_tabla(ws, encab, filas, "Angulos nodales (grados)")
 
     # ================= Hoja INVERSIONES =========================
     ws = wb.create_sheet("Inversiones")

@@ -118,11 +118,16 @@ def build_parameters(model, data):
     # delta_theta = 20 grados en radianes (k = indice de tramo, conj. K
     # de la tesis = SEG_PERD (=k) en el codigo). Es geometria pura (no depende
     # de datos de entrada), asi que se calcula aqui sobre SEG_PERD.
-    # nota-python: SEG_PERD.ord(k) da la posicion 1,2,3... del tramo k.
-    delta_theta = 20 * math.pi / 180  # 20 grados -> radianes
+    # nota-python: SEG_PERD.ord(k) da la posicion 1,2,3... del tramo k.    
+    
+    theta_max_total = 20 * math.pi / 180  # 20 grados -> radianes (rango total)
+    # Ancho de cada segmento = rango total / numero de segmentos (K).
+    # Cada uno de los K tramos de la linealizacion de Alguacil cubre
+    # una porcion igual del rango angular total, no el rango completo.
+    ancho_seg_perd = theta_max_total / data.n_seg_perdidas
 
     def alpha_init(m, k):
-        return delta_theta * (2 * m.SEG_PERD.ord(k) - 1)
+        return ancho_seg_perd * (2 * m.SEG_PERD.ord(k) - 1)
     model.alpha = pyo.Param(model.SEG_PERD, initialize=alpha_init)
 
     # ==================================================================

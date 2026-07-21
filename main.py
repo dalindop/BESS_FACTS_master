@@ -126,7 +126,9 @@ def ejecutar(ruta_caso, solver="highs", horas=None, exportar_lp=False,
         nombre_salida = f"resultados_{nombre_caso}_{sello}.xlsx"
         ruta_salida = os.path.join(_BASE, "04_Outputs", nombre_salida)
         results_export.exportar_resultados(
-            modelo, ruta_salida, salida["valor_objetivo"])
+            modelo, ruta_salida, salida["valor_objetivo"],
+            solver=salida.get("solver"),
+            tiempo_s=salida.get("tiempo_s"))
         if verbose:
             print(f"\n  Exportado a: 04_Outputs/{nombre_salida}")   
 
@@ -173,7 +175,13 @@ def _resumen_solucion(model):
         print("    FACTS instalados   : ninguno")
 
     # --- perdidas totales (primer periodo) ---
-    perd = sum(pyo.value(model.Ploss[l, t0]) for l in model.L_ALL)
+    # Si incluir_perdidas=0 (validacion DC), Ploss no es significativa
+    # (ver nota en results_export.py); se reporta como 0.
+    incl_perd = pyo.value(model.incluir_perdidas)
+    if incl_perd:
+        perd = sum(pyo.value(model.Ploss[l, t0]) for l in model.L_ALL)
+    else:
+        perd = 0.0
     print(f"\n  Perdidas totales (t={t0}): {perd:.2f} MW")
     print("-" * 52)
 
