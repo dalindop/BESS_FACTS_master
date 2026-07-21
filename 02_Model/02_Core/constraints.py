@@ -226,16 +226,18 @@ def build_constraints(model, data):
     # delta_seg=0 -> suma de bloques=0 -> Ploss=0. Asi una linea que no
     # existe no tiene perdidas (clave del enfoque, cf. Zhang 2012).
     import math
-    # Δδ = 20°= π/9 rad
-    # Es el tamaño máximo de cada bloque de la linealizacion de perdidas.
-    # Conversión de grados a radianes
-    delta_theta = 20 * math.pi / 180
-        
+    # theta_max = 20 grados = pi/9 rad (rango angular total permitido).
+    # El ancho de CADA bloque es theta_max / K (K = numero de segmentos,
+    # n_seg_perdidas), no theta_max completo -- cada tramo cubre una
+    # fraccion igual del rango total (Alguacil et al., 2003).
+    theta_max_total = 20 * math.pi / 180
+    ancho_seg_perd = theta_max_total / len(model.SEG_PERD)
+
     def perd_bloque_max_rule(m, l, k, t):
-        return m.delta_seg[l, k, t] <= delta_theta * x_eff(l)
+        return m.delta_seg[l, k, t] <= ancho_seg_perd * x_eff(l)
     model.perd_bloque_max = pyo.Constraint(
         model.L_ALL, model.SEG_PERD, model.T, rule=perd_bloque_max_rule)
-
+    
     # --- 2.3 Calculo de las perdidas ---------------------------------
     # Las pérdidas se calculan sumando el aporte de cada bloque, 
     # escalado por la conductancia
