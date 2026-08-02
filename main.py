@@ -21,6 +21,10 @@ Uso desde la terminal:
 ==================================================================
 """
 
+# Cronometro GLOBAL: primera linea ejecutable, antes de cualquier import.
+import time as _time
+_T_ARRANQUE = _time.perf_counter()
+
 import argparse
 import os
 import sys
@@ -58,6 +62,9 @@ def ejecutar(ruta_caso, solver="highs", horas=None, exportar_lp=False,
     exportar_lp : exporta el modelo a .lp.
     verbose     : imprime el progreso.
     """
+    # Marca de inicio del procesamiento del caso.
+    _t_ini = _time.perf_counter()
+
     # 1. CARGA
     if verbose:
         print(f"\n[1/4] Cargando datos: {ruta_caso}")
@@ -120,17 +127,42 @@ def ejecutar(ruta_caso, solver="highs", horas=None, exportar_lp=False,
     # 4. RESUMEN de la solucion
     if verbose and salida["resuelto"]:
         _resumen_solucion(modelo)
-        
-    # 5. EXPORTAR resultados a Excel (si se pidio)
+
+    # Tiempos de pared (se calculan ANTES de exportar e imprimir).
+    _t_desde_arranque = _time.perf_counter() - _T_ARRANQUE
+    _t_procesamiento = _time.perf_counter() - _t_ini
+    salida["tiempo_total_s"] = _t_desde_arranque
+    salida["tiempo_procesamiento_s"] = _t_procesamiento
+
+    # 5. EXPORTAR resultados a Excel (si se pidio).
     if exportar and salida["resuelto"]:
         nombre_salida = f"resultados_{nombre_caso}_{sello}.xlsx"
         ruta_salida = os.path.join(_BASE, "04_Outputs", nombre_salida)
         results_export.exportar_resultados(
             modelo, ruta_salida, salida["valor_objetivo"],
-            solver=salida.get("solver"),
-            tiempo_s=salida.get("tiempo_s"))
+            solver=solver,
+            tiempo_s=salida.get("tiempo_s", None),
+            tiempo_total_s=_t_desde_arranque,
+            tiempo_proc_s=_t_procesamiento)
         if verbose:
-            print(f"\n  Exportado a: 04_Outputs/{nombre_salida}")   
+            print(f"\n  Exportado a: 04_Outputs/{nombre_salida}")
+
+    # Reporte de tiempos en consola.
+    if verbose:
+        _t_solver = salida.get("tiempo_s", None)
+        print("\n" + "-" * 52)
+        print(f"  Tiempo desde que se lanzo el script: "
+              f"{_t_desde_arranque:8.2f} s")
+        print(f"  Tiempo de importar librerias       : "
+              f"{_t_desde_arranque - _t_procesamiento:8.2f} s")
+        print(f"  Tiempo de procesar el caso         : "
+              f"{_t_procesamiento:8.2f} s")
+        if _t_solver is not None:
+            print(f"    - solo el solver                 : "
+                  f"{_t_solver:8.2f} s")
+            print(f"    - construccion + lectura + export: "
+                  f"{_t_procesamiento - _t_solver:8.2f} s")
+        print("-" * 52)
 
     return modelo, salida
 

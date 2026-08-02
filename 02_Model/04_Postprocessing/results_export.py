@@ -48,7 +48,8 @@ def _escribir_tabla(ws, encabezados, filas, titulo, fila_ini=1):
 
 
 def exportar_resultados(model, ruta_salida, valor_objetivo=None,
-                         solver=None, tiempo_s=None):
+                         solver=None, tiempo_s=None,
+                         tiempo_total_s=None, tiempo_proc_s=None):
     """
     Exporta la solucion del modelo `model` (ya resuelto) a un Excel.
 
@@ -87,9 +88,9 @@ def exportar_resultados(model, ruta_salida, valor_objetivo=None,
         ["BESS instalados", len(bess_i)],
         ["FACTS instalados", len(facts_i)],
         ["Horizonte (h)", len(horas)],
-        ["Solver utilizado", solver if solver else "N/D"],       # <-- NUEVO
-        ["Tiempo de resolucion (s)",                              # <-- NUEVO
-         round(tiempo_s, 2) if tiempo_s is not None else "N/D"],  # <-- NUEVO
+        ["Solver utilizado", solver if solver else "N/D"],
+        ["Tiempo total simulacion (s)",
+         round(tiempo_total_s, 2) if tiempo_total_s is not None else "N/D"],
     ]
     _escribir_tabla(ws, ["Indicador", "Valor"], filas_res,
                     "Resumen de la solucion")
