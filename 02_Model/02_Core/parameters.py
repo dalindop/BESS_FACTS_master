@@ -142,7 +142,8 @@ def build_parameters(model, data):
     # reemplazara por un perfil horario, sin tocar este modulo: solo
     # cambia el dict data.demanda que entrega el loader.
     # note-python: filas = model.N, columnas = model.T. 
-    model.D = pyo.Param(model.N, model.T, initialize=data.demanda)
+    model.D = pyo.Param(model.N, model.T, initialize=data.demanda,
+                        default=0.0)
     
     # --- Disponibilidad renovable (tesis: Ar,t * Pr^max) --------------
     # Energia maxima que el recurso renovable r puede entregar en la hora

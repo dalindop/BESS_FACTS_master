@@ -119,6 +119,9 @@ def ejecutar(ruta_caso, solver="highs", horas=None, exportar_lp=False,
     ruta_lp = os.path.join(
         _BASE, "04_Outputs",
         f"modelo_{nombre_caso}_{solver}_{sello}.lp")
+    
+    if hasattr(datos, "solver") and datos.solver:
+        solver = datos.solver
 
     salida = solver_runner.resolver(
         modelo, datos, solver=solver, exportar_lp=exportar_lp,

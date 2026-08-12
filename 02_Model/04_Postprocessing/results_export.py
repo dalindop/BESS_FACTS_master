@@ -92,16 +92,39 @@ def exportar_resultados(model, ruta_salida, valor_objetivo=None,
         ["Tiempo total simulacion (s)",
          round(tiempo_total_s, 2) if tiempo_total_s is not None else "N/D"],
     ]
+    
+    # Costo prorrateado de BESS y FACTS (recalculado con la solucion)
+    def _crf(r, n):
+        return (r * (1 + r) ** n) / ((1 + r) ** n - 1)
+
+    dias_sim = len(model.T) / 24.0
+    tasa = pyo.value(model.tasa_desc)
+    crf_b = _crf(tasa, pyo.value(model.vida_bess))
+    crf_f = _crf(tasa, pyo.value(model.vida_facts))
+
+    costo_bess_val = (dias_sim / 365.0) * sum(
+        crf_b * (pyo.value(model.Cs_power) * pyo.value(model.Psmax[s])
+                 + pyo.value(model.Cs_energy) * pyo.value(model.Esmax[s]))
+        for s in model.S)
+
+    costo_facts_val = (dias_sim / 365.0) * sum(
+        crf_f * (pyo.value(model.Cf_inst) * pyo.value(model.z_f[f])
+                 + pyo.value(model.Cf_size) * pyo.value(model.dB_abs[f]))
+        for f in model.F)
+
+    filas_res.append(["Costo inversion BESS (USD)", round(costo_bess_val, 2)])
+    filas_res.append(["Costo inversion FACTS (USD)", round(costo_facts_val, 2)])
+    
     _escribir_tabla(ws, ["Indicador", "Valor"], filas_res,
                     "Resumen de la solucion")
 
     # ================= Hoja DESPACHO ============================
     ws = wb.create_sheet("Despacho")
-    encab = ["hora"] + [str(g) for g in model.G]
+    encab = ["hora"] + [str(g) for g in model.G] + [f"u_{g}" for g in model.G]
     filas = []
     for t in horas:
-        fila = [t] + [round(pyo.value(model.P_g[g, t]), 2)
-                      for g in model.G]
+        fila = ([t] + [round(pyo.value(model.P_g[g, t]), 2) for g in model.G]
+                    + [round(pyo.value(model.u[g, t]), 0) for g in model.G])
         filas.append(fila)
     _escribir_tabla(ws, encab, filas, "Despacho termico (MW)")
 

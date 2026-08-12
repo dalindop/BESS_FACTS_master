@@ -105,6 +105,7 @@ def cargar_datos(ruta_excel):
     d.n_seg_perdidas = int(cfg.get("n_seg_perdidas", 3))
     d.incluir_perdidas = int(cfg.get("incluir_perdidas", 1))   # <-- NUEVO
     d.mip_gap = cfg.get("mip_gap", 0.01)
+    d.solver = str(cfg.get("solver", "highs")).lower()
     # Costo base por p.u. de reactancia (para costo de lineas
     # proporcional a reactancia, Alguacil). Configurable.
     # d.costo_base_reactancia = float(
@@ -200,14 +201,15 @@ def cargar_datos(ruta_excel):
         if g.get("Pg_fijo") not in (None, ""):
             valor_fijo = float(g["Pg_fijo"])
             d.pg_fijo[gid] = valor_fijo
-            # Si el despacho fijo es > 0, el generador debe estar
-            # encendido; se asume estado inicial "ya operando" para
-            # evitar conflicto con la restriccion de tiempo minimo
-            # apagado (valida para el caso de validacion vs MATPOWER,
-            # que representa un estado estacionario, no un arranque).
+            # Modo validacion (despacho fijo): el estado inicial se
+            # deduce del despacho impuesto.
             d.onoff_t0[gid] = 1 if valor_fijo > 0 else 0
         else:
-            d.onoff_t0[gid] = 0
+            # Modo normal: leer el estado inicial u_init de la hoja
+            # (ecuacion u_g,0 = u_g^init de la formulacion). Si la
+            # columna no existe, por defecto apagado (0).
+            u_ini = g.get("u_init")
+            d.onoff_t0[gid] = int(u_ini) if u_ini not in (None, "") else 0
         # linealizar el costo cuadratico c2*P^2+c1*P+c0
         c2 = float(g.get("c2", 0) or 0)
         c1 = float(g.get("c1", 0) or 0)
@@ -278,7 +280,11 @@ def cargar_datos(ruta_excel):
     d.demanda = {}
     if dem_filas:
         for fila in dem_filas:
-            hora = int(fila.get("hora"))
+            hora_val = fila.get("hora")
+            # Saltar filas vacias (Excel deja filas fantasma al final).
+            if hora_val is None or hora_val == "":
+                continue
+            hora = int(hora_val)
             if hora > d.n_horas:
                 continue
             for nodo in d.nodos:
