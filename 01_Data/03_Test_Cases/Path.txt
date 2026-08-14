@@ -1,9 +1,0 @@
-"H:\My Drive\2. Universidad Nacional de Colombia\2. Postgraduate\1_SEMESTER\TESIS DE MAESTRIA\2nd Search\04_TESIS_DANIEL\03_CODIGO_TRABAJO_DANIEL\BESS_FACTS_master\01_Data\03_Test_Cases\caso_0_Base.xlsx"
-
-"H:\My Drive\2. Universidad Nacional de Colombia\2. Postgraduate\1_SEMESTER\TESIS DE MAESTRIA\2nd Search\04_TESIS_DANIEL\03_CODIGO_TRABAJO_DANIEL\BESS_FACTS_master\01_Data\03_Test_Cases\caso_1_Linea.xlsx"
-
-"H:\My Drive\2. Universidad Nacional de Colombia\2. Postgraduate\1_SEMESTER\TESIS DE MAESTRIA\2nd Search\04_TESIS_DANIEL\03_CODIGO_TRABAJO_DANIEL\BESS_FACTS_master\01_Data\03_Test_Cases\caso_2_BESS.xlsx"
-
-"H:\My Drive\2. Universidad Nacional de Colombia\2. Postgraduate\1_SEMESTER\TESIS DE MAESTRIA\2nd Search\04_TESIS_DANIEL\03_CODIGO_TRABAJO_DANIEL\BESS_FACTS_master\01_Data\03_Test_Cases\caso_3_FACTS.xlsx"
-
-"H:\My Drive\2. Universidad Nacional de Colombia\2. Postgraduate\1_SEMESTER\TESIS DE MAESTRIA\2nd Search\04_TESIS_DANIEL\03_CODIGO_TRABAJO_DANIEL\BESS_FACTS_master\01_Data\03_Test_Cases\caso_4_TODO.xlsx"

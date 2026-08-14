@@ -21,6 +21,10 @@ Uso desde la terminal:
 ==================================================================
 """
 
+# Cronometro GLOBAL: primera linea ejecutable, antes de cualquier import.
+import time as _time
+_T_ARRANQUE = _time.perf_counter()
+
 import argparse
 import os
 import sys
@@ -47,7 +51,7 @@ import solver_runner      # esta en 02_Model/03_Solvers
 import results_export     # esta en 04_Postprocessing
 
 
-def ejecutar(ruta_caso, solver="highs", horas=None, exportar_lp=False,
+def ejecutar(ruta_caso, solver=None, horas=None, exportar_lp=False,
              exportar=False, verbose=True):
     """
     Ejecuta el flujo completo para un caso y devuelve (modelo, salida).
@@ -58,6 +62,9 @@ def ejecutar(ruta_caso, solver="highs", horas=None, exportar_lp=False,
     exportar_lp : exporta el modelo a .lp.
     verbose     : imprime el progreso.
     """
+    # Marca de inicio del procesamiento del caso.
+    _t_ini = _time.perf_counter()
+
     # 1. CARGA
     if verbose:
         print(f"\n[1/4] Cargando datos: {ruta_caso}")
@@ -104,6 +111,11 @@ def ejecutar(ruta_caso, solver="highs", horas=None, exportar_lp=False,
                 modelo.u[g, t].fix(1 if valor > 0 else 0)
 
     # 3. RESUELVE
+    # Precedencia: (1) argumento de consola, (2) hoja Config, (3) highs.
+    # El argumento explicito SIEMPRE gana sobre el archivo.
+    if solver is None:
+        solver = getattr(datos, "solver", None) or "highs"
+
     if verbose:
         print(f"[3/4] Resolviendo con '{solver}'...")
     # ruta del .lp en 04_Outputs con caso + fecha/hora (si se pide)
@@ -112,7 +124,10 @@ def ejecutar(ruta_caso, solver="highs", horas=None, exportar_lp=False,
     ruta_lp = os.path.join(
         _BASE, "04_Outputs",
         f"modelo_{nombre_caso}_{solver}_{sello}.lp")
-
+    
+    # if hasattr(datos, "solver") and datos.solver:
+    #     solver = datos.solver
+    
     salida = solver_runner.resolver(
         modelo, datos, solver=solver, exportar_lp=exportar_lp,
         ruta_lp=ruta_lp, verbose=verbose)
@@ -120,17 +135,42 @@ def ejecutar(ruta_caso, solver="highs", horas=None, exportar_lp=False,
     # 4. RESUMEN de la solucion
     if verbose and salida["resuelto"]:
         _resumen_solucion(modelo)
-        
-    # 5. EXPORTAR resultados a Excel (si se pidio)
+
+    # Tiempos de pared (se calculan ANTES de exportar e imprimir).
+    _t_desde_arranque = _time.perf_counter() - _T_ARRANQUE
+    _t_procesamiento = _time.perf_counter() - _t_ini
+    salida["tiempo_total_s"] = _t_desde_arranque
+    salida["tiempo_procesamiento_s"] = _t_procesamiento
+
+    # 5. EXPORTAR resultados a Excel (si se pidio).
     if exportar and salida["resuelto"]:
         nombre_salida = f"resultados_{nombre_caso}_{sello}.xlsx"
         ruta_salida = os.path.join(_BASE, "04_Outputs", nombre_salida)
         results_export.exportar_resultados(
             modelo, ruta_salida, salida["valor_objetivo"],
-            solver=salida.get("solver"),
-            tiempo_s=salida.get("tiempo_s"))
+            solver=solver,
+            tiempo_s=salida.get("tiempo_s", None),
+            tiempo_total_s=_t_desde_arranque,
+            tiempo_proc_s=_t_procesamiento)
         if verbose:
-            print(f"\n  Exportado a: 04_Outputs/{nombre_salida}")   
+            print(f"\n  Exportado a: 04_Outputs/{nombre_salida}")
+
+    # Reporte de tiempos en consola.
+    if verbose:
+        _t_solver = salida.get("tiempo_s", None)
+        print("\n" + "-" * 52)
+        print(f"  Tiempo desde que se lanzo el script: "
+              f"{_t_desde_arranque:8.2f} s")
+        print(f"  Tiempo de importar librerias       : "
+              f"{_t_desde_arranque - _t_procesamiento:8.2f} s")
+        print(f"  Tiempo de procesar el caso         : "
+              f"{_t_procesamiento:8.2f} s")
+        if _t_solver is not None:
+            print(f"    - solo el solver                 : "
+                  f"{_t_solver:8.2f} s")
+            print(f"    - construccion + lectura + export: "
+                  f"{_t_procesamiento - _t_solver:8.2f} s")
+        print("-" * 52)
 
     return modelo, salida
 
@@ -153,26 +193,28 @@ def _resumen_solucion(model):
     # ELIMINADA función de la tesis
     # lineas_construidas = [l for l in model.LC
     #                       if pyo.value(model.x_l[l]) > 0.5]
-    bess_instalados = [s for s in model.S
-                       if pyo.value(model.y_s[s]) > 0.5]
-    facts_instalados = [f for f in model.F
-                        if pyo.value(model.z_f[f]) > 0.5]
+    bess_i = [s for s in model.S if pyo.value(model.Psmax[s]) > 1e-6]      
+    facts_i = [(f, z) for f in model.F for z in model.Z
+               if pyo.value(model.kappa[f, z]) > 0.5]
+    if facts_i:
+        for (f, z) in facts_i:
+            sg = pyo.value(model.sigma[z])
+            Q = pyo.value(model.Q_fz[f, z])
+            print(f"    TCSC en {f}: sigma={sg:.2f} ({Q:.2f} MVAr)")
+    else:
+        print("    FACTS instalados   : ninguno")
 
     print("\n  Decisiones de inversion (TEP):")
     # if lineas_construidas:
     #     print(f"    Lineas construidas : {lineas_construidas}")
     # else:
     #     print("    Lineas construidas : ninguna")
-    if bess_instalados:
-        for s in bess_instalados:
+    if bess_i:
+        for s in bess_i:
             ps = pyo.value(model.Psmax[s]); es = pyo.value(model.Esmax[s])
             print(f"    BESS en {s}: {ps:.1f} MW / {es:.1f} MWh")
     else:
-        print("    BESS instalados    : ninguno")
-    if facts_instalados:
-        print(f"    FACTS instalados   : {facts_instalados}")
-    else:
-        print("    FACTS instalados   : ninguno")
+        print("    BESS instalados    : ninguno")    
 
     # --- perdidas totales (primer periodo) ---
     # Si incluir_perdidas=0 (validacion DC), Ploss no es significativa
@@ -191,7 +233,7 @@ def main():
         description="Modelo TEP con BESS y FACTS.")
     parser.add_argument("caso", nargs="?", default="caso_WW.xlsx",
                         help="Ruta al Excel del caso (default caso_WW).")
-    parser.add_argument("--solver", default="highs",
+    parser.add_argument("--solver", default=None,
                         help="Solver: highs, gurobi, glpk, cbc, "
                              "cplex_neos.")
     parser.add_argument("--horas", type=int, default=None,

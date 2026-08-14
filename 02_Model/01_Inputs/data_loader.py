@@ -23,6 +23,7 @@ Un caso = un archivo Excel. La misma funcion lee el W&W, IEEE o Colombia.
 """
 # Librería que permite leer y modificar archivos Excel
 import openpyxl
+import math
 
 class DatosModelo:
     """
@@ -103,8 +104,14 @@ def cargar_datos(ruta_excel):
     d.n_horas = int(cfg.get("horizonte", 24))
     d.n_seg_costo = int(cfg.get("n_seg_costo", 3))
     d.n_seg_perdidas = int(cfg.get("n_seg_perdidas", 3))
+    # Cota angular unica del modelo. La usan el bloque de perdidas y los
+    # Big-M del TCSC. Definida en un solo lugar para que no puedan
+    # desincronizarse.
+    d.theta_max_total = float(cfg.get("theta_max_grados", 20.0)) * math.pi / 180.0
+    d.tasa_descuento = float(cfg.get("tasa_descuento", 0.115))
     d.incluir_perdidas = int(cfg.get("incluir_perdidas", 1))   # <-- NUEVO
     d.mip_gap = cfg.get("mip_gap", 0.01)
+    d.solver = str(cfg.get("solver", "highs")).lower()
     # Costo base por p.u. de reactancia (para costo de lineas
     # proporcional a reactancia, Alguacil). Configurable.
     # d.costo_base_reactancia = float(
@@ -127,13 +134,17 @@ def cargar_datos(ruta_excel):
             d.nodo_slack = nid
     if d.nodo_slack is None:
         d.nodo_slack = d.nodos[0]  # por defecto, el primero
+        
+    d.susceptancia = {}; 
+    d.conductancia = {}; 
+    d.flow_max = {}; 
+    d.resistencia = {}
 
     # ================= Lineas (obligatoria) ======================
     lineas = _leer_hoja(wb, "Lineas", obligatoria=True)
     if not lineas:
         raise ValueError("La hoja 'Lineas' esta vacia.")
     d.lineas = []
-    d.susceptancia = {}; d.conductancia = {}; d.flow_max = {}
     d.linea_from = {}; d.linea_to = {}
     for ln in lineas:
         lid = str(ln["id"])
@@ -141,21 +152,24 @@ def cargar_datos(ruta_excel):
         d.lineas.append(lid)
         d.susceptancia[lid] = 1.0 / x          # susceptancia SERIE = 1/X
         d.conductancia[lid] = r / (r**2 + x**2)  # conductancia de linea
+        d.resistencia[lid]  = r                  # R [p.u.] -> Luburic ec.(20)
         d.flow_max[lid] = float(ln["capacidad"])
         d.linea_from[lid] = str(ln["desde"])
         d.linea_to[lid] = str(ln["hasta"])
 
     # ============== Lineas_Cand (opcional) =======================
-    cand = _leer_hoja(wb, "Lineas_Cand", obligatoria=False)
+    cand = list(_leer_hoja(wb, "Lineas_Cand", obligatoria=False))
     d.lineas_cand = []
     d.costo_linea = {}
+    
     for c in cand:
         lid = str(c["id"])
         r = float(c["R"]); x = float(c["X"])
         d.lineas_cand.append(lid)
-        d.susceptancia[lid] = 1.0 / x
-        d.conductancia[lid] = r / (r**2 + x**2)
-        d.flow_max[lid] = float(c["capacidad"])
+        d.susceptancia[lid] = 1.0 / x          # susceptancia SERIE = 1/X
+        d.conductancia[lid] = r / (r**2 + x**2)  # conductancia de linea
+        d.resistencia[lid]  = r                  # R [p.u.] -> Luburic ec.(20)
+        d.flow_max[lid] = float(ln["capacidad"])
         d.linea_from[lid] = str(c["desde"])
         d.linea_to[lid] = str(c["hasta"])
         # Costo de la linea candidata. Dos modos:
@@ -200,14 +214,15 @@ def cargar_datos(ruta_excel):
         if g.get("Pg_fijo") not in (None, ""):
             valor_fijo = float(g["Pg_fijo"])
             d.pg_fijo[gid] = valor_fijo
-            # Si el despacho fijo es > 0, el generador debe estar
-            # encendido; se asume estado inicial "ya operando" para
-            # evitar conflicto con la restriccion de tiempo minimo
-            # apagado (valida para el caso de validacion vs MATPOWER,
-            # que representa un estado estacionario, no un arranque).
+            # Modo validacion (despacho fijo): el estado inicial se
+            # deduce del despacho impuesto.
             d.onoff_t0[gid] = 1 if valor_fijo > 0 else 0
         else:
-            d.onoff_t0[gid] = 0
+            # Modo normal: leer el estado inicial u_init de la hoja
+            # (ecuacion u_g,0 = u_g^init de la formulacion). Si la
+            # columna no existe, por defecto apagado (0).
+            u_ini = g.get("u_init")
+            d.onoff_t0[gid] = int(u_ini) if u_ini not in (None, "") else 0
         # linealizar el costo cuadratico c2*P^2+c1*P+c0
         c2 = float(g.get("c2", 0) or 0)
         c1 = float(g.get("c1", 0) or 0)
@@ -237,7 +252,7 @@ def cargar_datos(ruta_excel):
     d.disponibilidad_renov = {}  # se completa con perfil si aplica
 
     # ================= BESS_Cand (opcional) ======================
-    bess = _leer_hoja(wb, "BESS_Cand", obligatoria=False)
+    bess = list(_leer_hoja(wb, "BESS_Cand", obligatoria=False))
     d.nodos_bess = []; d.bess_en_nodo = {}
     for b in bess:
         nodo = str(b["nodo"])
@@ -262,23 +277,107 @@ def cargar_datos(ruta_excel):
             d.costo_bess_energy = float(b["costo_ene"])
 
     # ================= FACTS_Cand (opcional) =====================
-    facts = _leer_hoja(wb, "FACTS_Cand", obligatoria=False)
-    d.lineas_facts = []; d.facts_dB_min = {}; d.facts_dB_max = {}
+    # Formulacion por BLOQUES DISCRETOS de compensacion.
+    #   Estructura : Luburic et al. (2020) ec.(3); Esmaili et al. (2020) ec.(17)
+    #   Susceptancia: Luburic et al. (2020) ec.(21) con R=0 (modelo DC)
+    #   Conductancia: Luburic et al. (2020) ec.(20), con R
+    #   Costo      : de Oliveira et al. (1999) ecs.(A4)-(A5), Apendice B
+    facts = list(_leer_hoja(wb, "FACTS_Cand", obligatoria=False))
+
+    sig_txt = cfg.get("sigma_niveles", "0.15,0.30,0.45,0.60")
+    d.sigma_niveles = [float(s) for s in str(sig_txt).split(",")]
+    d.z_bloques = list(range(1, len(d.sigma_niveles) + 1))
+    d.sigma = {z: s for z, s in zip(d.z_bloques, d.sigma_niveles)}
+    # La funcion de costo (de Oliveira et al. 1999, ec. A4) esta formulada
+    # para compensacion CAPACITIVA. Un sigma negativo produciria una
+    # potencia reactiva negativa y, por tanto, un costo de inversion
+    # negativo: el modelo cobraria por instalar el dispositivo.
+    for z, sg in d.sigma.items():
+        if not (0.0 < sg < 1.0):
+            raise ValueError(
+                f"sigma_niveles: el nivel {sg} esta fuera de (0,1). "
+                f"Solo se admite compensacion capacitiva.")
+
+    d.c_tcsc = float(cfg.get("c_tcsc", 135000.0))      # USD/MVAr (overnight)
+    d.vida_facts = int(cfg.get("vida_facts", 20))      # anios
+
+    def _crf(r, n):
+        return (r * (1 + r) ** n) / ((1 + r) ** n - 1)
+
+    crf_f = _crf(d.tasa_descuento, d.vida_facts)
+
+    th = d.theta_max_total
+    d.lineas_facts = []
+    d.facts_dB = {}          # (f,z) -> susceptancia adicional   [p.u.]
+    d.facts_dG = {}          # (f,z) -> conductancia adicional   [p.u.]
+    d.facts_MB_on = {}       # (f,z) -> Big-M del flujo (cuando kappa=1) [p.u.]
+    d.facts_MB_off = {}      # (f,z) -> Big-M del flujo (cuando kappa=0) [p.u.]
+    d.facts_MG_on = {}       # (f,z) -> Big-M de perdidas (cuando kappa=1) [rad^2]
+    d.facts_MG_off = {}      # (f,z) -> Big-M de perdidas (cuando kappa=0) [rad^2]
+    d.facts_Q = {}           # (f,z) -> potencia reactiva        [MVAr]
+    d.facts_capex = {}       # (f,z) -> inversion overnight      [USD]
+    d.facts_anual = {}       # (f,z) -> costo anual equivalente  [USD/anio]
+
+    print(f"  [dbg] filas leidas en el bloque nuevo: {len(facts)}")
+    
     for f in facts:
         lid = str(f["linea"])
+        if f.get("habilitada") is not None and not int(f["habilitada"]):
+            continue
+        if lid not in d.lineas:
+            raise ValueError(f"FACTS_Cand: la linea '{lid}' no existe en 'Lineas'.")
         d.lineas_facts.append(lid)
-        d.facts_dB_min[lid] = float(f.get("dB_min", -0.5) or -0.5)
-        d.facts_dB_max[lid] = float(f.get("dB_max", 0.5) or 0.5)
-        if f.get("costo_inst") is not None:
-            d.costo_facts_inst = float(f["costo_inst"])
 
+        B_l = d.susceptancia[lid]          # 1/X   [p.u.]
+        x_l = 1.0 / B_l                    # X     [p.u.]
+        r_l = d.resistencia[lid]           # R     [p.u.]
+        S_l = d.flow_max[lid]              # Fmax  [MVA]
+        G_l = d.conductancia[lid]          # R/(R^2+X^2) [p.u.]
+
+        for z, sg in d.sigma.items():
+            x_new = x_l * (1.0 - sg)
+
+            # Susceptancia adicional  [ec. 3-4]
+            dB = B_l * sg / (1.0 - sg)
+            d.facts_dB[(lid, z)] = dB
+
+            # Bound tightening (Wu et al. 2023, p.5, ec.23). Con el bloque
+            # instalado, el limite de flujo acota el angulo, de donde
+            # |psi| <= sigma*Fmax/Sbase. Dos cotas: _on vale solo si
+            # kappa=1; _off vale siempre (relajacion cuando kappa=0).
+            th_on = min(th, (S_l / d.mva_base) / (B_l + dB))
+            d.facts_MB_on[(lid, z)] = abs(dB) * th_on
+            d.facts_MB_off[(lid, z)] = abs(dB) * th
+
+            # Conductancia adicional  [ec. 3-12; Luburic et al. 2020 ec.20]
+            G_new = r_l / (r_l ** 2 + x_new ** 2) if r_l > 0 else 0.0
+            d.facts_dG[(lid, z)] = G_new - G_l
+            d.facts_MG_on[(lid, z)] = th_on ** 2
+            d.facts_MG_off[(lid, z)] = th ** 2
+
+            # Potencia reactiva y costo  [ecs. 3-17, 3-18]
+            Q = sg * x_l * (S_l ** 2) / d.mva_base
+            d.facts_Q[(lid, z)] = Q
+            d.facts_capex[(lid, z)] = d.c_tcsc * Q
+            d.facts_anual[(lid, z)] = crf_f * d.c_tcsc * Q
+
+    # print(f"  [dbg] lineas_facts = {d.lineas_facts}")
+    # print(f"  [dbg] z_bloques    = {d.z_bloques}   sigma = {d.sigma}")
+    # print(f"  [dbg] capex: {len(d.facts_capex)} claves -> {sorted(d.facts_capex.keys())[:5]}")    
+    # print(f"  [dbg] dB:{len(d.facts_dB)} MBon:{len(d.facts_MB_on)} "
+    #       f"dG:{len(d.facts_dG)} Q:{len(d.facts_Q)} capex:{len(d.facts_capex)}")
+    
     # ================= Demanda (obligatoria) =====================
     # Estructura {hora x nodo}. Si un nodo no aparece, su demanda es 0.
     dem_filas = _leer_hoja(wb, "Demanda", obligatoria=True)
     d.demanda = {}
     if dem_filas:
         for fila in dem_filas:
-            hora = int(fila.get("hora"))
+            hora_val = fila.get("hora")
+            # Saltar filas vacias (Excel deja filas fantasma al final).
+            if hora_val is None or hora_val == "":
+                continue
+            hora = int(hora_val)
             if hora > d.n_horas:
                 continue
             for nodo in d.nodos:
@@ -305,5 +404,6 @@ if __name__ == "__main__":
     print(f"  Hidro      : {len(datos.gen_hidro)}")
     print(f"  Renovables : {len(datos.gen_renov)}")
     print(f"  BESS cand  : {len(datos.nodos_bess)}")
-    print(f"  FACTS cand : {len(datos.lineas_facts)}")
+    print(f"  FACTS cand : {len(datos.lineas_facts)} lineas x "
+          f"{len(datos.z_bloques)} bloques")
     print(f"  Horizonte  : {datos.n_horas} h")

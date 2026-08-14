@@ -87,6 +87,10 @@ def build_sets(model, data):
     model.F = pyo.Set(initialize=getattr(data, "lineas_facts", []),
                       ordered=True)    # lineas candidatas para FACTS
     
+    # Bloques discretos de compensacion del TCSC (Luburic et al. 2020,
+    # conjunto Omega^Z). Cada linea recibe a lo sumo un bloque.
+    model.Z = pyo.Set(initialize=getattr(data, "z_bloques", []), ordered=True)
+    
     # Union de lineas existentes y candidatas: L_ALL = L U LC.
     # El flujo, los limites de flujo y el balance nodal se definen sobre
     # TODAS las lineas (existentes + candidatas). Una linea candidata

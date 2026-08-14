@@ -51,6 +51,7 @@ def _configurar_solver(solver, mip_gap, time_limit):
         opt = pyo.SolverFactory("gurobi")
         opt.options["MIPGap"] = mip_gap
         opt.options["TimeLimit"] = time_limit
+        opt.options["MIPFocus"] = 1     # prioriza hallar soluciones factibles
         return opt, None, {}
  
     if s == "glpk":
@@ -108,8 +109,7 @@ def resolver(model, data=None, solver="highs", mip_gap=None,
         resultados = manager.solve(model, **kwargs)
     else:
         try:
-            resultados = opt.solve(model)
-            #resultados = opt.solve(model, tee=verbose)
+            resultados = opt.solve(model, tee=verbose)
         except RuntimeError as e:
             if "feasible solution was not found" in str(e).lower():
                 return {
