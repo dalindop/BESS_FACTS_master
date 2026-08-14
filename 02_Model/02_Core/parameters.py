@@ -120,7 +120,8 @@ def build_parameters(model, data):
     # de datos de entrada), asi que se calcula aqui sobre SEG_PERD.
     # nota-python: SEG_PERD.ord(k) da la posicion 1,2,3... del tramo k.    
     
-    theta_max_total = 20 * math.pi / 180  # 20 grados -> radianes (rango total)
+    #theta_max_total = 20 * math.pi / 180  # 20 grados -> radianes (rango total)
+    theta_max_total = data.theta_max_total
     # Ancho de cada segmento = rango total / numero de segmentos (K).
     # Cada uno de los K tramos de la linealizacion de Alguacil cubre
     # una porcion igual del rango angular total, no el rango completo.
@@ -268,10 +269,10 @@ def build_parameters(model, data):
     #   Cf_inst : costo fijo por instalar el dispositivo   (asociado z_f)
     #   Cf_size : costo por nivel de compensacion           (asociado X_f)
     
-    model.Cf_inst = pyo.Param(
-        initialize=getattr(data, "costo_facts_inst", 50000)) #USD/MVAr
-    model.Cf_size = pyo.Param(
-        initialize=getattr(data, "costo_facts_size", 0))
+    # model.Cf_inst = pyo.Param(
+    #     initialize=getattr(data, "costo_facts_inst", 50000)) #USD/MVAr
+    # model.Cf_size = pyo.Param(
+    #     initialize=getattr(data, "costo_facts_size", 0))
 
     # --- Parametros TECNICOS del BESS (para las restricciones) --------
     #   eff_ch  : eficiencia de carga (tesis: eta^ch).
@@ -296,31 +297,23 @@ def build_parameters(model, data):
     model.N_BESS = pyo.Param(
         initialize=getattr(data, "n_bess_max", len(model.S)))
  
-    # --- Parametros tecnicos del TCSC (FACTS) ------------------------
-    # Rango de susceptancia adicional que el TCSC puede aportar. Segun
-    # la literatura (Optimal Allocation, 2018) la compensacion va de
-    # -70% a +20% de la reactancia de la linea; aqui se expresa como
-    # susceptancia adicional (dB) con cotas por linea. Valores por
-    # defecto conservadores; se afinan con datos reales.
-    #   dB_min, dB_max : cotas de la susceptancia adicional del TCSC.
-    #   theta_max      : cota del angulo (para el Big-M del nivel 2).
-    model.dB_min = pyo.Param(
-        model.F, initialize=getattr(data, "facts_dB_min", {}),
-        default=-0.7)
-    model.dB_max = pyo.Param(
-        model.F, initialize=getattr(data, "facts_dB_max", {}),
-        default=0.2)
-    # theta_max: cota de diferencia angular con TCSC.
-    # 0.349 rad = pi/9 = 20°, limite de estabilidad.
-    model.theta_max_f = pyo.Param(
-        initialize=getattr(data, "facts_theta_max", 0.349))
-    # Big-M para las restricciones de linealizacion del TCSC (fisico).
-    model.M_facts = pyo.Param(
-        initialize=getattr(data, "facts_big_m", 10))
-    # Limite maximo de dispositivos FACTS instalables.
-    model.N_FACTS = pyo.Param(
-        initialize=getattr(data, "n_facts_max", len(model.F)))
+    # --- Parametros del TCSC por BLOQUE de compensacion ---------------
+    model.sigma    = pyo.Param(model.Z, initialize=getattr(data, "sigma", {}))
+    model.dB       = pyo.Param(model.F, model.Z, initialize=getattr(data, "facts_dB", {}))
+    model.dG       = pyo.Param(model.F, model.Z, initialize=getattr(data, "facts_dG", {}))
+    model.MB_on  = pyo.Param(model.F, model.Z, initialize=getattr(data, "facts_MB_on", {}))
+    model.MB_off = pyo.Param(model.F, model.Z, initialize=getattr(data, "facts_MB_off", {}))
+    model.MG_on  = pyo.Param(model.F, model.Z, initialize=getattr(data, "facts_MG_on", {}))
+    model.MG_off = pyo.Param(model.F, model.Z, initialize=getattr(data, "facts_MG_off", {}))
+    model.Q_fz     = pyo.Param(model.F, model.Z, initialize=getattr(data, "facts_Q", {}))
+    model.Cf_capex = pyo.Param(model.F, model.Z, initialize=getattr(data, "facts_capex", {}))
+    model.N_FACTS  = pyo.Param(initialize=getattr(data, "n_facts_max", len(model.F) * len(model.Z)))
     
+    # theta_max: cota de diferencia angular con TCSC.
+        # 0.349 rad = pi/9 = 20°, limite de estabilidad.
+    # model.theta_max_f = pyo.Param(
+    #     initialize=getattr(data, "facts_theta_max", 0.349))
+        
     # --- Parametros para ANUALIZAR las inversiones (CRF) ------------
     # tasa_desc  : tasa de descuento (ej. 0.115 = 11.5%)
     # vida_*     : vida util de cada tecnologia (anios)

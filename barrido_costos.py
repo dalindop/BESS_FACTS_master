@@ -58,15 +58,14 @@ except ImportError:
 # =====================================================================
 
 # Caso a analizar (puede venir por linea de comandos)
-CASO = r"H:\My Drive\2. Universidad Nacional de Colombia\2. Postgraduate\1_SEMESTER\TESIS DE MAESTRIA\2nd Search\04_TESIS_DANIEL\03_CODIGO_TRABAJO_DANIEL\BESS_FACTS_master\01_Data\03_Test_Cases\IEEE 14\03_Escenarios\01 - wo Stress\caso_IEEE14_E1_24h.xlsx"
-# Que tecnologia barrer: "bess", "facts" o "ambas"
+CASO = r"H:\My Drive\2. Universidad Nacional de Colombia\2. Postgraduate\1_SEMESTER\TESIS DE MAESTRIA\2nd Search\04_TESIS_DANIEL\03_CODIGO_TRABAJO_DANIEL\BESS_FACTS_master\01_Data\03_Test_Cases\caso_IEEE14_E3_24h.xlsx"
 #   - "bess"  : escala solo costos de BESS  (para E1)
 #   - "facts" : escala solo costos de FACTS (para E2)
 #   - "ambas" : escala ambos por el mismo factor (para E3)
-TECNOLOGIA = "bess"
+TECNOLOGIA = "ambas"
 
 # Factores de costo a probar (1.0 = costo original NREL; 0.0 = gratis)
-FACTORES = [1.00, 0.90, 0.75, 0.50, 0.25, 0.10, 0.05, 0.03, 0.025, 0.02, 0.01]
+FACTORES = [1.00, 0.50, 0.25, 0.10, 0.05, 0.03, 0.02, 0.015, 0.01, 0.005]
 
 SOLVER = "gurobi"
 MIP_GAP = 0.0001        # fino para BESS; sube a 0.01 si incluyes FACTS
@@ -80,11 +79,15 @@ def _escalar_costos(datos, factor, tecnologia):
             datos.costo_bess_power *= factor
         if hasattr(datos, "costo_bess_energy"):
             datos.costo_bess_energy *= factor
+
     if tecnologia in ("facts", "ambas"):
-        if hasattr(datos, "costo_facts_inst"):
-            datos.costo_facts_inst *= factor
-        if hasattr(datos, "costo_facts_size"):
-            datos.costo_facts_size *= factor
+        # El costo del TCSC ya no es un par (inst, size): es un unico
+        # costo por bloque, derivado de c_tcsc [USD/MVAr] y de la
+        # potencia reactiva Q_{f,z}. Basta escalar c_tcsc y recalcular.
+        if hasattr(datos, "c_tcsc"):
+            datos.c_tcsc *= factor
+            for k, Q in datos.facts_Q.items():
+                datos.facts_capex[k] = datos.c_tcsc * Q
     return datos
 
 
@@ -106,19 +109,21 @@ def _leer_instalado(modelo):
             es_tot += max(es, 0)
 
     n_facts = 0
-    db_tot = 0.0
-    if hasattr(modelo, "F"):
+    mvar_tot = 0.0
+    sigma_sum = 0.0
+    if hasattr(modelo, "F") and hasattr(modelo, "kappa"):
         for f in modelo.F:
-            z = pyo.value(modelo.z_f[f]) if hasattr(modelo, "z_f") else 0
-            z = z or 0
-            if z > 0.5:
-                n_facts += 1
-            if hasattr(modelo, "dB_abs"):
-                db_tot += max(pyo.value(modelo.dB_abs[f]) or 0, 0)
+            for z in modelo.Z:
+                k = pyo.value(modelo.kappa[f, z]) or 0
+                if k > 0.5:
+                    n_facts += 1
+                    mvar_tot += pyo.value(modelo.Q_fz[f, z]) or 0
+                    sigma_sum += pyo.value(modelo.sigma[z]) or 0
+    sigma_med = sigma_sum / n_facts if n_facts else 0.0
 
     return {
         "n_bess": n_bess, "ps_tot": ps_tot, "es_tot": es_tot,
-        "n_facts": n_facts, "db_tot": db_tot,
+        "n_facts": n_facts, "mvar_tot": mvar_tot, "sigma_med": sigma_med,
     }
 
 
@@ -130,7 +135,8 @@ def barrido(caso, tecnologia=TECNOLOGIA, factores=FACTORES,
     print(f"  Caso: {os.path.basename(caso)}")
     print("=" * 78)
     print(f"{'factor':>7} {'costo%':>7} | {'BESS n':>6} {'P(MW)':>8} "
-          f"{'E(MWh)':>8} | {'FACTS n':>7} {'dB tot':>7} | {'costo obj':>14}")
+          f"{'E(MWh)':>8} | {'FACTS n':>7} {'MVAr':>7} {'sigma':>6} | "
+          f"{'costo obj':>14}")
     print("-" * 78)
 
     for factor in factores:
@@ -145,7 +151,7 @@ def barrido(caso, tecnologia=TECNOLOGIA, factores=FACTORES,
         if not salida.get("resuelto"):
             print(f"{factor:7.2f} {factor*100:6.0f}% | "
                   f"{'INFACTIBLE o no resuelto':>50}")
-            filas.append([factor, "infactible", "", "", "", "", "", ""])
+            filas.append([factor, "infactible", "", "", "", "", "", "", ""])
             continue
 
         inst = _leer_instalado(modelo)
@@ -153,11 +159,12 @@ def barrido(caso, tecnologia=TECNOLOGIA, factores=FACTORES,
         print(f"{factor:7.2f} {factor*100:6.0f}% | "
               f"{inst['n_bess']:6d} {inst['ps_tot']:8.2f} "
               f"{inst['es_tot']:8.2f} | "
-              f"{inst['n_facts']:7d} {inst['db_tot']:7.2f} | "
-              f"{costo:14,.2f}")
+              f"{inst['n_facts']:7d} {inst['mvar_tot']:7.2f} "
+              f"{inst['sigma_med']:6.2f} | {costo:14,.2f}")
         filas.append([factor, "ok", inst["n_bess"], round(inst["ps_tot"], 3),
                       round(inst["es_tot"], 3), inst["n_facts"],
-                      round(inst["db_tot"], 3), round(costo, 2)])
+                      round(inst["mvar_tot"], 3), round(inst["sigma_med"], 3),
+                      round(costo, 2)])
 
     print("=" * 78)
 
@@ -167,7 +174,8 @@ def barrido(caso, tecnologia=TECNOLOGIA, factores=FACTORES,
         ws = wb.active
         ws.title = "Barrido"
         ws.append(["factor_costo", "estado", "n_BESS", "P_BESS_MW",
-                   "E_BESS_MWh", "n_FACTS", "dB_FACTS_total", "costo_obj_USD"])
+                   "E_BESS_MWh", "n_FACTS", "MVAr_FACTS_total",
+                   "sigma_medio", "costo_obj_USD"])
         for f in filas:
             ws.append(f)
         out_dir = os.path.join(_BASE, "04_Outputs")

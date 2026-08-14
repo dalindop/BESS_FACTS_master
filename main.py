@@ -51,7 +51,7 @@ import solver_runner      # esta en 02_Model/03_Solvers
 import results_export     # esta en 04_Postprocessing
 
 
-def ejecutar(ruta_caso, solver="highs", horas=None, exportar_lp=False,
+def ejecutar(ruta_caso, solver=None, horas=None, exportar_lp=False,
              exportar=False, verbose=True):
     """
     Ejecuta el flujo completo para un caso y devuelve (modelo, salida).
@@ -111,6 +111,11 @@ def ejecutar(ruta_caso, solver="highs", horas=None, exportar_lp=False,
                 modelo.u[g, t].fix(1 if valor > 0 else 0)
 
     # 3. RESUELVE
+    # Precedencia: (1) argumento de consola, (2) hoja Config, (3) highs.
+    # El argumento explicito SIEMPRE gana sobre el archivo.
+    if solver is None:
+        solver = getattr(datos, "solver", None) or "highs"
+
     if verbose:
         print(f"[3/4] Resolviendo con '{solver}'...")
     # ruta del .lp en 04_Outputs con caso + fecha/hora (si se pide)
@@ -120,9 +125,9 @@ def ejecutar(ruta_caso, solver="highs", horas=None, exportar_lp=False,
         _BASE, "04_Outputs",
         f"modelo_{nombre_caso}_{solver}_{sello}.lp")
     
-    if hasattr(datos, "solver") and datos.solver:
-        solver = datos.solver
-
+    # if hasattr(datos, "solver") and datos.solver:
+    #     solver = datos.solver
+    
     salida = solver_runner.resolver(
         modelo, datos, solver=solver, exportar_lp=exportar_lp,
         ruta_lp=ruta_lp, verbose=verbose)
@@ -188,26 +193,28 @@ def _resumen_solucion(model):
     # ELIMINADA función de la tesis
     # lineas_construidas = [l for l in model.LC
     #                       if pyo.value(model.x_l[l]) > 0.5]
-    bess_instalados = [s for s in model.S
-                       if pyo.value(model.y_s[s]) > 0.5]
-    facts_instalados = [f for f in model.F
-                        if pyo.value(model.z_f[f]) > 0.5]
+    bess_i = [s for s in model.S if pyo.value(model.Psmax[s]) > 1e-6]      
+    facts_i = [(f, z) for f in model.F for z in model.Z
+               if pyo.value(model.kappa[f, z]) > 0.5]
+    if facts_i:
+        for (f, z) in facts_i:
+            sg = pyo.value(model.sigma[z])
+            Q = pyo.value(model.Q_fz[f, z])
+            print(f"    TCSC en {f}: sigma={sg:.2f} ({Q:.2f} MVAr)")
+    else:
+        print("    FACTS instalados   : ninguno")
 
     print("\n  Decisiones de inversion (TEP):")
     # if lineas_construidas:
     #     print(f"    Lineas construidas : {lineas_construidas}")
     # else:
     #     print("    Lineas construidas : ninguna")
-    if bess_instalados:
-        for s in bess_instalados:
+    if bess_i:
+        for s in bess_i:
             ps = pyo.value(model.Psmax[s]); es = pyo.value(model.Esmax[s])
             print(f"    BESS en {s}: {ps:.1f} MW / {es:.1f} MWh")
     else:
-        print("    BESS instalados    : ninguno")
-    if facts_instalados:
-        print(f"    FACTS instalados   : {facts_instalados}")
-    else:
-        print("    FACTS instalados   : ninguno")
+        print("    BESS instalados    : ninguno")    
 
     # --- perdidas totales (primer periodo) ---
     # Si incluir_perdidas=0 (validacion DC), Ploss no es significativa
@@ -226,7 +233,7 @@ def main():
         description="Modelo TEP con BESS y FACTS.")
     parser.add_argument("caso", nargs="?", default="caso_WW.xlsx",
                         help="Ruta al Excel del caso (default caso_WW).")
-    parser.add_argument("--solver", default="highs",
+    parser.add_argument("--solver", default=None,
                         help="Solver: highs, gurobi, glpk, cbc, "
                              "cplex_neos.")
     parser.add_argument("--horas", type=int, default=None,

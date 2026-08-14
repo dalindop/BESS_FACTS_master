@@ -19,9 +19,9 @@ Desglose (notacion de la tesis):
                donde Cg(Pg,t) = fg_min*u + SUM_m slope*dP_seg  (linealiz.)
   Hidraulico : SUM_{h,t} Ch * Ph,t
   Transmision: SUM_{l in LC} Cl * x_l                 (expansion lineas)
-  BESS       : SUM_{s in S} (Cs^inst*y_s + Cs^power*Psmax
-                             + Cs^energy*Esmax)
-  FACTS      : SUM_{f in F} (Cf^inst*z_f + Cf^size*X_f)   <-- DIFERIDO
+  BESS  : delta_T * SUM_s (Cs^P_anual*Psmax + Cs^E_anual*Esmax)
+  FACTS : delta_T * SUM_f SUM_z Cf^anual_{f,z} * kappa_{f,z}
+  con delta_T = |T|/8760
 
 ALCANCE DE ESTE PASO:
   Se incluyen todos los terminos MENOS FACTS. El termino FACTS es
@@ -85,13 +85,36 @@ def build_objective(model, data):
     # para ser coherente con el horizonte de operacion.
     # Con interés (recuperacion lineal simple).
     # ================================================================
+    
+    
+    # ================================================================
+    # Inversion. Los costos anuales equivalentes (FRC ya aplicado) se
+    # definen como parametros en parameters.py / data_loader.py. Aqui
+    # solo se escala al horizonte simulado.
+    #   delta_T = |T| / 8760  ->  horizonte expresado en anios
+    # ================================================================
     def _crf(r, n):
         # Factor de Recuperacion de Capital (Qiu et al. 2017;
         # Zakeri & Syri, 2015). r=tasa, n=vida util en anios.
         return (r * (1 + r)**n) / ((1 + r)**n - 1)
 
-    crf_bess = _crf(model.tasa_desc, model.vida_bess)
-    crf_facts = _crf(model.tasa_desc, model.vida_facts)
+    crf_bess  = _crf(model.tasa_desc, model.vida_bess)    # 15 anios
+    crf_facts = _crf(model.tasa_desc, model.vida_facts)   # 20 anios
+
+    # Horizonte simulado expresado en anios. Lleva el costo anual
+    # equivalente a la misma base temporal que los costos de operacion.
+    # Se adapta a cualquier horizonte: 1 h, 24 h, 1 mes, 1 anio.
+    delta_T = len(model.T) / 8760.0
+
+    costo_bess = delta_T * crf_bess * sum(
+        model.Cs_power * model.Psmax[s] + model.Cs_energy * model.Esmax[s]
+        for s in model.S
+    )
+
+    costo_facts = delta_T * crf_facts * sum(
+        model.Cf_capex[f, z] * model.kappa[f, z]
+        for f in model.F for z in model.Z
+    )
 
     dias_simulados = len(model.T) / 24.0
 
@@ -102,10 +125,14 @@ def build_objective(model, data):
         for s in model.S
     )
 
+    # Costo FACTS: un unico costo por par (linea, bloque de compensacion),
+    # que ya embebe instalacion y dimensionamiento. No se separa en
+    # C_inst*z + C_size*X porque ninguna de las referencias revisadas
+    # (Ziaee 2018, Luburic 2020, Esmaili 2020, Wu 2023) usa esa
+    # separacion.
     costo_facts = (dias_simulados / 365.0) * sum(
-        crf_facts * (model.Cf_inst * model.z_f[f]
-                      + model.Cf_size * model.dB_abs[f])
-        for f in model.F
+        crf_facts * model.Cf_capex[f, z] * model.kappa[f, z]
+        for f in model.F for z in model.Z
     )
 
     model.obj = pyo.Objective(

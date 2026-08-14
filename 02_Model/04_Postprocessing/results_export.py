@@ -66,8 +66,9 @@ def exportar_resultados(model, ruta_salida, valor_objetivo=None,
     # ================= Hoja RESUMEN =============================
     ws = wb.active; ws.title = "Resumen"
     # lineas_c = [l for l in model.L_ALL if pyo.value(model.x_l[l]) > 0.5]
-    bess_i = [s for s in model.S if pyo.value(model.y_s[s]) > 0.5]
-    facts_i = [f for f in model.F if pyo.value(model.z_f[f]) > 0.5]
+    bess_i = [s for s in model.S if pyo.value(model.Psmax[s]) > 1e-6]
+    facts_i = [(f, z) for f in model.F for z in model.Z
+               if pyo.value(model.kappa[f, z]) > 0.5]
     # Si incluir_perdidas=0 (modo validacion DC), las variables Ploss
     # no participan en el balance ni en los limites de flujo; su valor
     # calculado (ligado solo a la diferencia angular real) no es
@@ -102,15 +103,25 @@ def exportar_resultados(model, ruta_salida, valor_objetivo=None,
     crf_b = _crf(tasa, pyo.value(model.vida_bess))
     crf_f = _crf(tasa, pyo.value(model.vida_facts))
 
-    costo_bess_val = (dias_sim / 365.0) * sum(
-        crf_b * (pyo.value(model.Cs_power) * pyo.value(model.Psmax[s])
-                 + pyo.value(model.Cs_energy) * pyo.value(model.Esmax[s]))
+    # costo_bess_val = (dias_sim / 365.0) * sum(
+    #     crf_b * (pyo.value(model.Cs_power) * pyo.value(model.Psmax[s])
+    #              + pyo.value(model.Cs_energy) * pyo.value(model.Esmax[s]))
+    #     for s in model.S)
+
+    # costo_facts_val = (dias_sim / 365.0) * sum(
+    #     crf_f * pyo.value(model.Cf_capex[f, z])
+    #     * pyo.value(model.kappa[f, z])
+    #     for f in model.F for z in model.Z)
+    
+    delta_T = len(model.T) / 8760.0
+    costo_bess_val = delta_T * crf_b * sum(
+        pyo.value(model.Cs_power) * pyo.value(model.Psmax[s])
+        + pyo.value(model.Cs_energy) * pyo.value(model.Esmax[s])
         for s in model.S)
 
-    costo_facts_val = (dias_sim / 365.0) * sum(
-        crf_f * (pyo.value(model.Cf_inst) * pyo.value(model.z_f[f])
-                 + pyo.value(model.Cf_size) * pyo.value(model.dB_abs[f]))
-        for f in model.F)
+    costo_facts_val = delta_T * crf_f * sum(
+        pyo.value(model.Cf_capex[f, z]) * pyo.value(model.kappa[f, z])
+        for f in model.F for z in model.Z)
 
     filas_res.append(["Costo inversion BESS (USD)", round(costo_bess_val, 2)])
     filas_res.append(["Costo inversion FACTS (USD)", round(costo_facts_val, 2)])
@@ -163,6 +174,25 @@ def exportar_resultados(model, ruta_salida, valor_objetivo=None,
                     for n in model.N]
         filas.append(fila)
     _escribir_tabla(ws, encab, filas, "Angulos nodales (grados)")
+    
+    # ================= Hoja FACTS ===============================
+    # Flujo inducido por el TCSC en cada linea compensada (MW/hora).
+    # Es la evidencia cuantitativa de la redistribucion de flujos.
+    ws = wb.create_sheet("FACTS")
+    if len(facts_i) > 0:
+        encab = ["hora"] + [f"{f} dP_TCSC (MW)" for (f, z) in facts_i]
+        filas = []
+        for t in horas:
+            fila = [t]
+            for (f, z) in facts_i:
+                dp = pyo.value(model.MVA_base) * sum(
+                    pyo.value(model.psi[f, zz, t]) for zz in model.Z)
+                fila.append(round(dp, 3))
+            filas.append(fila)
+        _escribir_tabla(ws, encab, filas, "Flujo inducido por el TCSC (MW)")
+    else:
+        _escribir_tabla(ws, ["-"], [["ningun TCSC instalado"]],
+                        "Flujo inducido por el TCSC (MW)")
 
     # ================= Hoja INVERSIONES =========================
     ws = wb.create_sheet("Inversiones")
@@ -173,9 +203,10 @@ def exportar_resultados(model, ruta_salida, valor_objetivo=None,
         ps = round(pyo.value(model.Psmax[s]), 1)
         es = round(pyo.value(model.Esmax[s]), 1)
         filas_inv.append(["BESS", str(s), f"{ps} MW", f"{es} MWh"])
-    for f in facts_i:
-        db = round(pyo.value(model.dB_f[f]), 3)
-        filas_inv.append(["FACTS", str(f), f"dB={db}", ""])
+    for (f, z) in facts_i:
+        sg = pyo.value(model.sigma[z])
+        Q = pyo.value(model.Q_fz[f, z])
+        filas_inv.append(["TCSC", str(f), f"sigma={sg:.2f}", f"{Q:.2f} MVAr"])
     if not filas_inv:
         filas_inv.append(["-", "ninguna inversion", "", ""])
     _escribir_tabla(ws, ["Tipo", "Ubicacion", "Detalle_1", "Detalle_2"],
