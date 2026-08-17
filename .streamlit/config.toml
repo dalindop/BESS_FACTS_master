@@ -1,0 +1,14 @@
+[server]
+runOnSave = true
+
+[browser]
+gatherUsageStats = false
+
+
+[theme]
+base = "light"
+primaryColor = "#466B3F"
+backgroundColor = "#FAFAF7"            # blanco cálido, tinte apenas perceptible
+secondaryBackgroundColor = "#F0F2E8"   # barra lateral y tarjetas, un paso más
+textColor = "#565A5C"
+font = "sans serif"

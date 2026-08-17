@@ -121,8 +121,12 @@ def ejecutar(ruta_caso, solver=None, horas=None, exportar_lp=False,
     # ruta del .lp en 04_Outputs con caso + fecha/hora (si se pide)
     nombre_caso = os.path.splitext(os.path.basename(ruta_caso))[0]
     sello = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Garantizar que exista la carpeta de salidas. Se crea si falta, de
+    # modo que un clon nuevo del repositorio funcione sin preparacion
+    # manual (03_Outputs/ suele estar en .gitignore).
+    os.makedirs(os.path.join(_BASE, "03_Outputs"), exist_ok=True)
     ruta_lp = os.path.join(
-        _BASE, "04_Outputs",
+        _BASE, "03_Outputs",
         f"modelo_{nombre_caso}_{solver}_{sello}.lp")
     
     # if hasattr(datos, "solver") and datos.solver:
@@ -143,17 +147,21 @@ def ejecutar(ruta_caso, solver=None, horas=None, exportar_lp=False,
     salida["tiempo_procesamiento_s"] = _t_procesamiento
 
     # 5. EXPORTAR resultados a Excel (si se pidio).
+    # La ruta se guarda en 'salida' para que quien llame a esta funcion
+    # (por ejemplo la interfaz grafica) pueda leer el archivo generado.
+    salida["ruta_resultados"] = None
     if exportar and salida["resuelto"]:
         nombre_salida = f"resultados_{nombre_caso}_{sello}.xlsx"
-        ruta_salida = os.path.join(_BASE, "04_Outputs", nombre_salida)
+        ruta_salida = os.path.join(_BASE, "03_Outputs", nombre_salida)
         results_export.exportar_resultados(
             modelo, ruta_salida, salida["valor_objetivo"],
             solver=solver,
             tiempo_s=salida.get("tiempo_s", None),
             tiempo_total_s=_t_desde_arranque,
             tiempo_proc_s=_t_procesamiento)
+        salida["ruta_resultados"] = ruta_salida
         if verbose:
-            print(f"\n  Exportado a: 04_Outputs/{nombre_salida}")
+            print(f"\n  Exportado a: 03_Outputs/{nombre_salida}")
 
     # Reporte de tiempos en consola.
     if verbose:
@@ -241,7 +249,7 @@ def main():
     parser.add_argument("--lp", action="store_true",
                         help="Exporta el modelo a .lp.")
     parser.add_argument("--export", action="store_true",
-                        help="Exporta los resultados a 04_Outputs.")
+                        help="Exporta los resultados a 03_Outputs.")
     args = parser.parse_args()
 
     ejecutar(args.caso, solver=args.solver, horas=args.horas,

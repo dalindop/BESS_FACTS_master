@@ -241,6 +241,12 @@ def build_parameters(model, data):
     # Se lee de Config con la clave tol_volumen_final; por defecto 0.05.
     model.tol_vol = pyo.Param(
         initialize=float(getattr(data, "tol_volumen_final", 0.05)))
+
+    # Penalizacion del vertimiento [USD por m3/s y hora]. NO es un costo
+    # real: rompe la degeneracion entre turbinar y verter. Se lee de Config
+    # con la clave costo_vertimiento; por defecto 0.01.
+    model.c_vert = pyo.Param(
+        initialize=float(getattr(data, "costo_vertimiento", 0.01)))
     
     
     # ==================================================================

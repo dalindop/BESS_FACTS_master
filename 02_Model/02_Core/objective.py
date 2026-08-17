@@ -135,9 +135,18 @@ def build_objective(model, data):
         for f in model.F for z in model.Z
     )
 
+    # ------------------------------------------------------------------
+    # Penalizacion del vertimiento. No representa un costo real: es un
+    # termino de regularizacion que rompe la degeneracion entre turbinar
+    # y verter. Sin el, el solver reparte arbitrariamente entre q_h y S_h
+    # porque ambos son indiferentes para la funcion objetivo.
+    # ------------------------------------------------------------------
+    costo_vert = model.c_vert * sum(model.S_h[h, t]
+                                    for h in model.H for t in model.T)
+
     model.obj = pyo.Objective(
         expr=(costo_termico + costo_hidraulico
-              + costo_bess + costo_facts),
+              + costo_bess + costo_facts + costo_vert),
         sense=pyo.minimize
     )
 

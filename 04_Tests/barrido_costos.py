@@ -21,7 +21,7 @@ o editando la variable CASO abajo y ejecutando con el boton Run.
 SALIDA
 ------
 Imprime una tabla en consola y guarda un Excel con los resultados en
-la carpeta 04_Outputs.
+la carpeta 03_Outputs.
 """
 
 import os
@@ -178,12 +178,12 @@ def barrido(caso, tecnologia=TECNOLOGIA, factores=FACTORES,
                    "sigma_medio", "costo_obj_USD"])
         for f in filas:
             ws.append(f)
-        out_dir = os.path.join(_BASE, "04_Outputs")
+        out_dir = os.path.join(_BASE, "03_Outputs")
         os.makedirs(out_dir, exist_ok=True)
         nombre = f"barrido_{tecnologia}_{os.path.basename(caso)}"
         ruta_out = os.path.join(out_dir, nombre)
         wb.save(ruta_out)
-        print(f"  Resultados guardados en: 04_Outputs/{nombre}\n")
+        print(f"  Resultados guardados en: 03_Outputs/{nombre}\n")
 
     return filas
 

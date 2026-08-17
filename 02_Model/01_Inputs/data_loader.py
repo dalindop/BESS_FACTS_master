@@ -121,6 +121,9 @@ def cargar_datos(ruta_excel):
     # Banda admitida para el cierre de volumen del embalse:
     # |V_T - V_init| <= tol_volumen_final * (Vmax - Vmin).
     d.tol_volumen_final = float(cfg.get("tol_volumen_final", 0.05))
+    # Penalizacion del vertimiento [USD por m3/s y hora]. Termino de
+    # regularizacion, no un costo real.
+    d.costo_vertimiento = float(cfg.get("costo_vertimiento", 0.01))
 
     # ================= Nodos (obligatoria) =======================
     nodos = _leer_hoja(wb, "Nodos", obligatoria=True)
@@ -394,8 +397,6 @@ def cargar_datos(ruta_excel):
     d.facts_capex = {}       # (f,z) -> inversion overnight      [USD]
     d.facts_anual = {}       # (f,z) -> costo anual equivalente  [USD/anio]
 
-    print(f"  [dbg] filas leidas en el bloque nuevo: {len(facts)}")
-    
     for f in facts:
         lid = str(f["linea"])
         if f.get("habilitada") is not None and not int(f["habilitada"]):

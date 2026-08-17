@@ -138,7 +138,38 @@ def exportar_resultados(model, ruta_salida, valor_objetivo=None,
                     + [round(pyo.value(model.u[g, t]), 0) for g in model.G])
         filas.append(fila)
     _escribir_tabla(ws, encab, filas, "Despacho termico (MW)")
-
+    
+    # ================= Hoja BALANCE =============================
+    # Agrega la generacion por TECNOLOGIA y la contrasta con la demanda
+    # total del sistema en cada hora. Alimenta la grafica de cobertura
+    # de la demanda en la interfaz grafica, y permite verificar el
+    # cierre del balance global:
+    #   Termica + Hidraulica + Renovable + Descarga = Demanda +
+    #                                       Carga + Perdidas
+    ws = wb.create_sheet("Balance")
+    encab = ["hora", "Termica (MW)", "Hidraulica (MW)", "Renovable (MW)",
+             "BESS descarga (MW)", "BESS carga (MW)", "Demanda (MW)",
+             "Perdidas (MW)"]
+    filas = []
+    for t in horas:
+        p_ter = sum(pyo.value(model.P_g[g, t]) for g in model.G)
+        p_hid = sum(pyo.value(model.P_h[h, t]) for h in model.H)
+        p_ren = sum(pyo.value(model.P_r[r, t]) for r in model.R)
+        p_dis = sum(pyo.value(model.Pdis[s, t]) for s in bess_i)
+        p_car = sum(pyo.value(model.Pch[s, t]) for s in bess_i)
+        dem = sum(pyo.value(model.D[n, t]) for n in model.N)
+        if incl_perd:
+            perd = sum(pyo.value(model.Ploss[l, t]) for l in model.L_ALL)
+        else:
+            perd = 0.0
+        filas.append([t,
+                      round(p_ter, 2), round(p_hid, 2), round(p_ren, 2),
+                      round(p_dis, 2), round(p_car, 2),
+                      round(dem, 2), round(perd, 3)])
+    _escribir_tabla(ws, encab, filas,
+                    "Balance de potencia por tecnologia (MW)")
+    
+    
     # ================= Hoja FLUJOS ==============================
     ws = wb.create_sheet("Flujos")
     encab = ["hora"] + [str(l) for l in model.L_ALL]
@@ -230,9 +261,6 @@ def exportar_resultados(model, ruta_salida, valor_objetivo=None,
                 ws, encab, filas, f"BESS en {s}", fila_ini=fila_actual)
             fila_actual += 2
 
-    wb.save(ruta_salida)
-    return ruta_salida
-
 # ================= Hoja Hidraulica ===========================
     # Operacion del embalse por unidad y hora. Permite verificar que el
     # balance V_t = V_{t-1} + I_t - k*(q_t + S_t) cierra numericamente.
@@ -256,6 +284,8 @@ def exportar_resultados(model, ruta_salida, valor_objetivo=None,
         _escribir_tabla(ws, ["-"], [["sin unidades hidraulicas"]],
                         "Operacion hidraulica")
 
+    wb.save(ruta_salida)
+    return ruta_salida
 
 if __name__ == "__main__":
     import sys
