@@ -29,6 +29,13 @@ BUENAS PRACTICAS aplicadas:
   - Sin DataFrames globales: todo entra por `data`/conjuntos.
 
 Notacion: identica al Cap. 3 de la tesis.
+
+# NOTA: las restricciones de caudal minimo (3c.3, cota inferior),
+# variacion de caudal (3c.8) y vertimiento maximo (3c.6) se
+# implementan pero quedan inactivas mediante Constraint.Skip cuando
+# el parametro correspondiente es cero. Ningun parametro publico del
+# sistema colombiano los define (ver Cap.3, "Alcance de la
+# implementacion").
 ==================================================================
 """
 
@@ -315,6 +322,97 @@ def build_constraints(model, data):
         model.G, model.SEG_COST, model.T, rule=seg_max_rule)
     
     # ==================================================================
+    # Bloque 3c -- GENERACION HIDRAULICA (tesis Cap.3)
+    # ==================================================================
+    # Referencias: Soroudi (2017, pp. 80, 83); Wood & Wollenberg (2013,
+    # p.18); Qiu et al. (2017, p.646).
+
+    # --- 3c.1 Limite de generacion  Pmin <= P_h <= Pmax --------------
+    def hid_lim_pot_rule(m, h, t):
+        return (m.Pmin_h[h], m.P_h[h, t], m.Pmax_h[h])
+    model.hid_lim_pot = pyo.Constraint(model.H, model.T,
+                                       rule=hid_lim_pot_rule)
+
+    # --- 3c.2 Relacion potencia-caudal  P = eta * q ------------------
+    def hid_pot_caudal_rule(m, h, t):
+        if pyo.value(m.eta_h[h]) <= 0:
+            return pyo.Constraint.Skip
+        return m.P_h[h, t] == m.eta_h[h] * m.q_h[h, t]
+    model.hid_pot_caudal = pyo.Constraint(model.H, model.T,
+                                          rule=hid_pot_caudal_rule)
+
+    # --- 3c.3 Limite de caudal  qmin <= q <= qmax --------------------
+    def hid_lim_caudal_rule(m, h, t):
+        if pyo.value(m.qmax_h[h]) <= 0:      # ← si no hay dato, se salta
+            return pyo.Constraint.Skip
+        return (m.qmin_h[h], m.q_h[h, t], m.qmax_h[h])
+    model.hid_lim_caudal = pyo.Constraint(model.H, model.T,
+                                          rule=hid_lim_caudal_rule)
+
+    # --- 3c.4 Balance del embalse -----------------------------------
+    # V_t = V_{t-1} + I_t - k*(q_t + S_t).  k convierte m3/s -> hm3/h.
+    def hid_balance_rule(m, h, t):
+        if pyo.value(m.Vmax_h[h]) <= 0:
+            return pyo.Constraint.Skip
+        v_ant = m.Vinit_h[h] if t == m.T.first() else m.V_h[h, t - 1]
+        return (m.V_h[h, t] == v_ant + m.I_h[h, t]
+                - m.k_q2v * (m.q_h[h, t] + m.S_h[h, t]))
+    model.hid_balance = pyo.Constraint(model.H, model.T,
+                                       rule=hid_balance_rule)
+
+    # --- 3c.5 Limites de volumen ------------------------------------
+    def hid_lim_vol_rule(m, h, t):
+        if pyo.value(m.Vmax_h[h]) <= 0:
+            return pyo.Constraint.Skip
+        return (m.Vmin_h[h], m.V_h[h, t], m.Vmax_h[h])
+    model.hid_lim_vol = pyo.Constraint(model.H, model.T,
+                                       rule=hid_lim_vol_rule)
+
+    # --- 3c.6 Limite de vertimiento ---------------------------------
+    def hid_lim_vert_rule(m, h, t):
+        if pyo.value(m.Smax_h[h]) <= 0:      # ← si no hay dato, se salta
+            return pyo.Constraint.Skip
+        return m.S_h[h, t] <= m.Smax_h[h]
+    model.hid_lim_vert = pyo.Constraint(model.H, model.T,
+                                        rule=hid_lim_vert_rule)
+
+    # --- 3c.7 Volumen final dentro de una banda del inicial ---------
+    # Se relaja el cierre exacto V_T = V_init porque cuatro embalses
+    # reciben aportes incompletos: XM no publica series para los rios
+    # TUNJITA, RUCIO, NEGRO y BRAVO.
+    def hid_vol_final_sup_rule(m, h):
+        if pyo.value(m.Vmax_h[h]) <= 0:
+            return pyo.Constraint.Skip
+        tol = m.tol_vol * (m.Vmax_h[h] - m.Vmin_h[h])
+        return m.V_h[h, m.T.last()] <= m.Vinit_h[h] + tol
+    model.hid_vol_final_sup = pyo.Constraint(model.H,
+                                             rule=hid_vol_final_sup_rule)
+
+    def hid_vol_final_inf_rule(m, h):
+        if pyo.value(m.Vmax_h[h]) <= 0:
+            return pyo.Constraint.Skip
+        tol = m.tol_vol * (m.Vmax_h[h] - m.Vmin_h[h])
+        return m.V_h[h, m.T.last()] >= m.Vinit_h[h] - tol
+    model.hid_vol_final_inf = pyo.Constraint(model.H,
+                                             rule=hid_vol_final_inf_rule)
+
+    # --- 3c.8 Variacion maxima de caudal (en valor absoluto) --------
+    # |q_t - q_{t-1}| <= Rq  se descompone en dos desigualdades.
+    def hid_rampa_sub_rule(m, h, t):
+        if t == m.T.first() or pyo.value(m.Rq_h[h]) <= 0:   # ← igual
+            return pyo.Constraint.Skip
+        return m.q_h[h, t] - m.q_h[h, t - 1] <= m.Rq_h[h]
+    model.hid_rampa_sub = pyo.Constraint(model.H, model.T,
+                                         rule=hid_rampa_sub_rule)
+
+    def hid_rampa_baj_rule(m, h, t):
+        if t == m.T.first() or pyo.value(m.Rq_h[h]) <= 0:
+            return pyo.Constraint.Skip
+        return m.q_h[h, t - 1] - m.q_h[h, t] <= m.Rq_h[h]
+    model.hid_rampa_baj = pyo.Constraint(model.H, model.T,
+                                         rule=hid_rampa_baj_rule)
+    
+    # ==================================================================
     # Bloque 3b -- GENERACION RENOVABLE (con curtailment)
     # ==================================================================
     # Formulacion de la tesis (Forma B): la energia disponible se reparte
@@ -335,7 +433,8 @@ def build_constraints(model, data):
         return m.P_r[r, t] <= m.disp_renov[r, t]
     model.renov_max = pyo.Constraint(
         model.R, model.T, rule=renov_max_rule)
- 
+    
+     
     # ==================================================================
     # Bloque 4 -- UNIT COMMITMENT (logica de arranque/parada)
     # ==================================================================

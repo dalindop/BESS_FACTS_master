@@ -48,6 +48,11 @@ def build_variables(model, data):
     # negativos a estas variables.
     model.P_g = pyo.Var(model.G, model.T, domain=pyo.NonNegativeReals)
     model.P_h = pyo.Var(model.H, model.T, domain=pyo.NonNegativeReals)
+    # Caudal turbinado, volumen del embalse y vertimiento (tesis Cap.3)
+    model.q_h = pyo.Var(model.H, model.T, domain=pyo.NonNegativeReals)
+    model.V_h = pyo.Var(model.H, model.T, domain=pyo.NonNegativeReals)
+    model.S_h = pyo.Var(model.H, model.T, domain=pyo.NonNegativeReals)
+    
     model.P_r = pyo.Var(model.R, model.T, domain=pyo.NonNegativeReals)
 
     # Vertimiento renovable (curtailment): energia renovable disponible

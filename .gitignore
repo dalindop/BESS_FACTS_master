@@ -169,3 +169,9 @@ tmp/
 .DS_Store
 Thumbs.db
 
+01_Data/01_Raw/
+04_Outputs/
+*.lp
+.venv/
+__pycache__/
+

@@ -118,6 +118,9 @@ def cargar_datos(ruta_excel):
     #     cfg.get("costo_base_reactancia", 5.0e7))
     d.n_seg_perdidas = int(cfg.get("n_seg_perdidas", 3))
     d.time_limit = cfg.get("time_limit", 1800)
+    # Banda admitida para el cierre de volumen del embalse:
+    # |V_T - V_init| <= tol_volumen_final * (Vmax - Vmin).
+    d.tol_volumen_final = float(cfg.get("tol_volumen_final", 0.05))
 
     # ================= Nodos (obligatoria) =======================
     nodos = _leer_hoja(wb, "Nodos", obligatoria=True)
@@ -234,22 +237,95 @@ def cargar_datos(ruta_excel):
             d.slope_term[(gid, mm)] = v
 
     # ================= Hidraulicos (opcional) ====================
-    hidro = _leer_hoja(wb, "Hidraulicos", obligatoria=False)
+    # Tesis Cap.3, modelado detallado de generacion hidraulica:
+    #   Pmin <= P_h,t <= Pmax                    (Soroudi 2017, p.83)
+    #   Vmin <= V_h,t <= Vmax                    (Soroudi 2017, p.80)
+    #   qmin <= q_h,t <= qmax                    (Soroudi 2017, p.80)
+    #   P_h,t = eta_h * q_h,t                    (Wood & Wollenberg, p.18)
+    #   V_h,t = V_h,t-1 + I_h,t - q_h,t - S_h,t  (Soroudi 2017, p.80)
+    #   V_h,0 = V_h,T = Vinit                    (Soroudi 2017, p.80)
+    #   q_h,t - q_h,t-1 <= Rq                    (Qiu et al. 2017, p.646)
+    hidro = list(_leer_hoja(wb, "Hidraulicos", obligatoria=False))
     d.gen_hidro = []; d.hid_en_nodo = {}; d.costo_hidro = {}
+    d.pmin_hid = {}; d.pmax_hid = {}
+    d.qmin_hid = {}; d.qmax_hid = {}; d.eta_hid = {}
+    d.vmin_hid = {}; d.vmax_hid = {}; d.vinit_hid = {}
+    d.smax_hid = {}; d.rq_hid = {}
     for h in hidro:
         hid = str(h["id"])
         d.gen_hidro.append(hid)
         d.hid_en_nodo.setdefault(str(h["nodo"]), []).append(hid)
         d.costo_hidro[hid] = float(h.get("costo", 0) or 0)
+        d.pmin_hid[hid] = float(h.get("Pmin", 0) or 0)
+        d.pmax_hid[hid] = float(h.get("Pmax", 0) or 0)
+        d.qmin_hid[hid] = float(h.get("qmin", 0) or 0)
+        d.qmax_hid[hid] = float(h.get("qmax", 0) or 0)
+        d.eta_hid[hid] = float(h.get("eta", 0) or 0)
+        d.vmin_hid[hid] = float(h.get("Vmin", 0) or 0)
+        d.vmax_hid[hid] = float(h.get("Vmax", 0) or 0)
+        d.vinit_hid[hid] = float(h.get("Vinit", 0) or 0)
+        d.smax_hid[hid] = float(h.get("Smax", 0) or 0)
+        d.rq_hid[hid] = float(h.get("Rq", 0) or 0)
+
+    # ------------- Aportes hidrologicos I_{h,t} -------------------
+    # Hoja {hora x unidad} en hm3/h. Si el dato de origen es diario, el
+    # reparto uniforme entre horas es un supuesto propio a declarar.
+    ap = list(_leer_hoja(wb, "Aportes", obligatoria=False))
+    d.aportes_hid = {}
+    if ap:
+        for fila in ap:
+            hora_val = fila.get("hora")
+            if hora_val in (None, ""):
+                continue
+            hora = int(hora_val)
+            if hora > d.n_horas:
+                continue
+            for hid in d.gen_hidro:
+                v = fila.get(hid)
+                d.aportes_hid[(hid, hora)] = float(v) if v is not None else 0.0
+    elif d.gen_hidro:
+        print("  AVISO: hoja 'Aportes' ausente. I_h,t = 0: los embalses "
+              "solo se vacian.")
 
     # ================= Renovables (opcional) =====================
-    renov = _leer_hoja(wb, "Renovables", obligatoria=False)
-    d.gen_renov = []; d.ren_en_nodo = {}
+    # Tesis Cap.3: la disponibilidad renovable es A_{r,t} * Pr^max, donde
+    # A_{r,t} es el factor de disponibilidad horario (p.u.) y Pr^max la
+    # capacidad instalada (MW). El producto se almacena ya en MW.
+    renov = list(_leer_hoja(wb, "Renovables", obligatoria=False))
+    d.gen_renov = []; d.ren_en_nodo = {}; d.cap_renov = {}
     for r in renov:
         rid = str(r["id"])
         d.gen_renov.append(rid)
         d.ren_en_nodo.setdefault(str(r["nodo"]), []).append(rid)
-    d.disponibilidad_renov = {}  # se completa con perfil si aplica
+        d.cap_renov[rid] = float(r.get("capacidad", 0) or 0)
+
+    # ------------- Renov_Perfil (factor de disponibilidad) --------
+    # Hoja {hora x recurso} con fracciones 0-1. Si no existe, la
+    # disponibilidad queda en cero y se emite advertencia: dejarla en 1.0
+    # haria que las plantas solares generaran de noche.
+    perf = list(_leer_hoja(wb, "Renov_Perfil", obligatoria=False))
+    d.disponibilidad_renov = {}
+    if perf:
+        for fila in perf:
+            hora_val = fila.get("hora")
+            if hora_val in (None, ""):
+                continue
+            hora = int(hora_val)
+            if hora > d.n_horas:
+                continue
+            for rid in d.gen_renov:
+                frac = fila.get(rid)
+                if frac is None:
+                    continue
+                d.disponibilidad_renov[(rid, hora)] = (
+                    float(frac) * d.cap_renov[rid])
+        faltan = [rid for rid in d.gen_renov
+                  if (rid, 1) not in d.disponibilidad_renov]
+        if faltan:
+            print(f"  AVISO: sin perfil en Renov_Perfil -> {faltan}")
+    elif d.gen_renov:
+        print("  AVISO: hoja 'Renov_Perfil' ausente. La disponibilidad "
+              "renovable queda en 0 y esos recursos no generaran.")
 
     # ================= BESS_Cand (opcional) ======================
     bess = list(_leer_hoja(wb, "BESS_Cand", obligatoria=False))

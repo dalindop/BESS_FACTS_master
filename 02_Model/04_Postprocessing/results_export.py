@@ -233,6 +233,29 @@ def exportar_resultados(model, ruta_salida, valor_objetivo=None,
     wb.save(ruta_salida)
     return ruta_salida
 
+# ================= Hoja Hidraulica ===========================
+    # Operacion del embalse por unidad y hora. Permite verificar que el
+    # balance V_t = V_{t-1} + I_t - k*(q_t + S_t) cierra numericamente.
+    ws = wb.create_sheet("Hidraulica")
+    if len(model.H) > 0:
+        for h in model.H:
+            encab = ["hora", "P (MW)", "q (m3/s)", "V (hm3)",
+                     "S (m3/s)", "I (hm3/h)"]
+            filas = []
+            for t in horas:
+                filas.append([
+                    t,
+                    round(pyo.value(model.P_h[h, t]), 3),
+                    round(pyo.value(model.q_h[h, t]), 3),
+                    round(pyo.value(model.V_h[h, t]), 4),
+                    round(pyo.value(model.S_h[h, t]), 3),
+                    round(pyo.value(model.I_h[h, t]), 4),
+                ])
+            _escribir_tabla(ws, encab, filas, f"Embalse {h}")
+    else:
+        _escribir_tabla(ws, ["-"], [["sin unidades hidraulicas"]],
+                        "Operacion hidraulica")
+
 
 if __name__ == "__main__":
     import sys

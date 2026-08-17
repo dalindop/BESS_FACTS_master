@@ -219,6 +219,30 @@ def build_parameters(model, data):
     # TODO: poblar costos hidraulicos reales en el caso Colombia.
     model.C_h = pyo.Param(model.H,
                           initialize=getattr(data, "costo_hidro", {}))
+    
+    # --- Parametros de generacion hidraulica (tesis Cap.3) ------------
+    model.Pmin_h = pyo.Param(model.H, initialize=getattr(data, "pmin_hid", {}), default=0.0)
+    model.Pmax_h = pyo.Param(model.H, initialize=getattr(data, "pmax_hid", {}), default=0.0)
+    model.qmin_h = pyo.Param(model.H, initialize=getattr(data, "qmin_hid", {}), default=0.0)
+    model.qmax_h = pyo.Param(model.H, initialize=getattr(data, "qmax_hid", {}), default=0.0)
+    model.eta_h  = pyo.Param(model.H, initialize=getattr(data, "eta_hid", {}),  default=0.0)
+    model.Vmin_h = pyo.Param(model.H, initialize=getattr(data, "vmin_hid", {}), default=0.0)
+    model.Vmax_h = pyo.Param(model.H, initialize=getattr(data, "vmax_hid", {}), default=0.0)
+    model.Vinit_h= pyo.Param(model.H, initialize=getattr(data, "vinit_hid", {}),default=0.0)
+    model.Smax_h = pyo.Param(model.H, initialize=getattr(data, "smax_hid", {}), default=0.0)
+    model.Rq_h   = pyo.Param(model.H, initialize=getattr(data, "rq_hid", {}),   default=0.0)
+    model.I_h    = pyo.Param(model.H, model.T,
+                             initialize=getattr(data, "aportes_hid", {}), default=0.0)
+
+    # Conversion de caudal a volumen: 1 m3/s durante 1 h = 0.0036 hm3
+    model.k_q2v = pyo.Param(initialize=0.0036)
+
+    # Tolerancia del cierre de volumen: |V_T - V_init| <= tol_vol*(Vmax-Vmin).
+    # Se lee de Config con la clave tol_volumen_final; por defecto 0.05.
+    model.tol_vol = pyo.Param(
+        initialize=float(getattr(data, "tol_volumen_final", 0.05)))
+    
+    
     # ==================================================================
     # Bloque 4 -- COSTOS DE INVERSION (para la funcion objetivo)
     # ==================================================================
