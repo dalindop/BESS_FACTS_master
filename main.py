@@ -52,7 +52,7 @@ import results_export     # esta en 04_Postprocessing
 
 
 def ejecutar(ruta_caso, solver=None, horas=None, exportar_lp=False,
-             exportar=False, verbose=True):
+             exportar=False, verbose=True, reiniciar_cronometro=False):
     """
     Ejecuta el flujo completo para un caso y devuelve (modelo, salida).
 
@@ -62,6 +62,15 @@ def ejecutar(ruta_caso, solver=None, horas=None, exportar_lp=False,
     exportar_lp : exporta el modelo a .lp.
     verbose     : imprime el progreso.
     """
+    
+    # Cuando se invoca desde la interfaz grafica, el modulo ya estaba
+    # importado y _T_ARRANQUE quedo fijado al inicio de la sesion. En ese
+    # caso el cronometro global se reinicia para que el tiempo total mida
+    # esta corrida y no la vida de la sesion.
+    global _T_ARRANQUE
+    if reiniciar_cronometro:
+        _T_ARRANQUE = _time.perf_counter()
+    
     # Marca de inicio del procesamiento del caso.
     _t_ini = _time.perf_counter()
 

@@ -170,8 +170,15 @@ tmp/
 Thumbs.db
 
 01_Data/01_Raw/
-04_Outputs/
+03_Outputs/
 *.lp
 .venv/
 __pycache__/
 
+
+AGENTS.md
+CLAUDE.md
+
+BESS_FACTS_master.code-workspace
+
+04_Tests/

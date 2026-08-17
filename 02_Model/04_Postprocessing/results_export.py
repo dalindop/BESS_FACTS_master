@@ -271,11 +271,15 @@ def exportar_resultados(model, ruta_salida, valor_objetivo=None,
                      "S (m3/s)", "I (hm3/h)"]
             filas = []
             for t in horas:
+                # Las filas de filo de agua tienen Vmax = 0: el balance de
+                # embalse se omite y V_h no entra en ninguna restriccion, por
+                # lo que el solver no le devuelve valor. Se reporta como 0.
+                v_h = model.V_h[h, t].value
                 filas.append([
                     t,
                     round(pyo.value(model.P_h[h, t]), 3),
                     round(pyo.value(model.q_h[h, t]), 3),
-                    round(pyo.value(model.V_h[h, t]), 4),
+                    round(v_h, 4) if v_h is not None else 0.0,
                     round(pyo.value(model.S_h[h, t]), 3),
                     round(pyo.value(model.I_h[h, t]), 4),
                 ])

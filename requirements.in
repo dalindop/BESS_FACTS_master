@@ -8,3 +8,5 @@ jupyter
 notebook
 ipykernel
 gurobipy
+streamlit
+plotly

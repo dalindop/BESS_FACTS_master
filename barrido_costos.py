@@ -167,25 +167,19 @@ def barrido(caso, tecnologia=TECNOLOGIA, factores=FACTORES,
                       round(costo, 2)])
 
     print("=" * 78)
+    
+    ruta_out = None
 
     # Guardar a Excel
-    if _HAY_OPENPYXL:
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Barrido"
-        ws.append(["factor_costo", "estado", "n_BESS", "P_BESS_MW",
-                   "E_BESS_MWh", "n_FACTS", "MVAr_FACTS_total",
-                   "sigma_medio", "costo_obj_USD"])
-        for f in filas:
-            ws.append(f)
-        out_dir = os.path.join(_BASE, "03_Outputs")
-        os.makedirs(out_dir, exist_ok=True)
-        nombre = f"barrido_{tecnologia}_{os.path.basename(caso)}"
-        ruta_out = os.path.join(out_dir, nombre)
-        wb.save(ruta_out)
-        print(f"  Resultados guardados en: 03_Outputs/{nombre}\n")
+    # No se escribe ningun archivo. La funcion devuelve los encabezados y
+    # las filas; quien llame decide que hacer con ellos. Desde consola se
+    # ignoran (la tabla ya se imprimio); la interfaz grafica construye el
+    # Excel en memoria solo si el usuario pide descargarlo.
+    encabezados = ["factor_costo", "estado", "n_BESS", "P_BESS_MW",
+                   "E_BESS_MWh", "n_FACTS", "dB_FACTS_total",
+                   "costo_obj_USD"]
 
-    return filas
+    return encabezados, filas
 
 
 if __name__ == "__main__":
