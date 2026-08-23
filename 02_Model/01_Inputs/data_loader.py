@@ -121,6 +121,17 @@ def cargar_datos(ruta_excel):
     # Banda admitida para el cierre de volumen del embalse:
     # |V_T - V_init| <= tol_volumen_final * (Vmax - Vmin).
     d.tol_volumen_final = float(cfg.get("tol_volumen_final", 0.05))
+    # Banda asimetrica opcional:
+    #   Vinit - tol_inf*(Vmax-Vmin) <= V_T <= Vinit + tol_sup*(Vmax-Vmin).
+    # El problema fisico es que el embalse no alcanza a recuperar volumen
+    # con el aporte del horizonte, no que lo supere; por eso conviene
+    # relajar el limite inferior mas que el superior. Si las claves no
+    # estan en Config, ambas toman tol_volumen_final y la banda vuelve a
+    # ser simetrica: los casos anteriores no cambian.
+    d.tol_volumen_inf = float(cfg.get("tol_volumen_inf",
+                                      d.tol_volumen_final))
+    d.tol_volumen_sup = float(cfg.get("tol_volumen_sup",
+                                      d.tol_volumen_final))
     # Penalizacion del vertimiento [USD por m3/s y hora]. Termino de
     # regularizacion, no un costo real.
     d.costo_vertimiento = float(cfg.get("costo_vertimiento", 0.01))
@@ -130,12 +141,12 @@ def cargar_datos(ruta_excel):
     if not nodos:
         raise ValueError("La hoja 'Nodos' esta vacia.")
     d.nodos = []
-    demanda_base = {}
+    # demanda_base = {}
     d.nodo_slack = None
     for n in nodos:
         nid = str(n["id"])
         d.nodos.append(nid)
-        demanda_base[nid] = n.get("demanda_base", 0) or 0
+        # demanda_base[nid] = n.get("demanda_base", 0) or 0
         if str(n.get("tipo", "")).lower() == "slack":
             d.nodo_slack = nid
     if d.nodo_slack is None:
@@ -175,7 +186,9 @@ def cargar_datos(ruta_excel):
         d.susceptancia[lid] = 1.0 / x          # susceptancia SERIE = 1/X
         d.conductancia[lid] = r / (r**2 + x**2)  # conductancia de linea
         d.resistencia[lid]  = r                  # R [p.u.] -> Luburic ec.(20)
-        d.flow_max[lid] = float(ln["capacidad"])
+        # 'c' es la candidata; usar 'ln' aqui heredaba la capacidad de la
+        # ultima fila de 'Lineas' a TODAS las candidatas.
+        d.flow_max[lid] = float(c["capacidad"])
         d.linea_from[lid] = str(c["desde"])
         d.linea_to[lid] = str(c["hasta"])
         # Costo de la linea candidata. Dos modos:
@@ -210,8 +223,24 @@ def cargar_datos(ruta_excel):
         d.gen_termica.append(gid)
         pmin = float(g["Pmin"]); pmax = float(g["Pmax"])
         d.pmin_term[gid] = pmin; d.pmax_term[gid] = pmax
-        rampa = float(g.get("rampa", pmax) or pmax)
-        d.ramp_up[gid] = rampa; d.ramp_down[gid] = rampa
+        # rampa = float(g.get("rampa", pmax) or pmax)
+        # d.ramp_up[gid] = rampa; d.ramp_down[gid] = rampa
+        
+        # Rampas de subida y bajada en MW/h. PARATEC las publica por
+        # separado en MW/min (hoja VelCarga-Descarga) y pueden diferir.
+        # Las columnas 'rampa_sub_min' y 'rampa_baj_min' del Excel son
+        # documentales: NO se leen aqui. Se admite la columna unica
+        # 'rampa' por compatibilidad con los casos del IEEE 14.
+        r_up = g.get("rampa_sub")
+        r_dn = g.get("rampa_baj")
+        if r_up is None or r_dn is None:
+            rampa = float(g.get("rampa", pmax) or pmax)
+            r_up = rampa if r_up is None else r_up
+            r_dn = rampa if r_dn is None else r_dn
+        d.ramp_up[gid] = min(float(r_up), pmax)
+        d.ramp_down[gid] = min(float(r_dn), pmax)        
+        
+        
         d.gen_en_nodo.setdefault(str(g["nodo"]), []).append(gid)
         d.l_up_min[gid] = int(g.get("min_on", 1) or 1)
         d.l_down_min[gid] = int(g.get("min_off", 1) or 1)
@@ -271,8 +300,10 @@ def cargar_datos(ruta_excel):
         d.rq_hid[hid] = float(h.get("Rq", 0) or 0)
 
     # ------------- Aportes hidrologicos I_{h,t} -------------------
-    # Hoja {hora x unidad} en hm3/h. Si el dato de origen es diario, el
-    # reparto uniforme entre horas es un supuesto propio a declarar.
+    # Hoja {hora x embalse} en m3/s, dato directo de AporCaudal. La
+    # conversion a Mm3 la hace el modelo con k_q2v en el balance, igual
+    # que para el turbinado y el vertimiento. Si el dato de origen es
+    # diario, el reparto uniforme entre horas es un supuesto propio.
     ap = list(_leer_hoja(wb, "Aportes", obligatoria=False))
     d.aportes_hid = {}
     if ap:
@@ -460,11 +491,18 @@ def cargar_datos(ruta_excel):
             for nodo in d.nodos:
                 val = fila.get(nodo)
                 d.demanda[(nodo, hora)] = float(val) if val else 0.0
+    # else:
+    #     # sin hoja de demanda: usar la demanda base constante
+    #     for nodo in d.nodos:
+    #         for t in range(1, d.n_horas + 1):
+    #             d.demanda[(nodo, t)] = float(demanda_base.get(nodo, 0))
     else:
-        # sin hoja de demanda: usar la demanda base constante
-        for nodo in d.nodos:
-            for t in range(1, d.n_horas + 1):
-                d.demanda[(nodo, t)] = float(demanda_base.get(nodo, 0))
+        # La hoja 'Demanda' es ahora obligatoria: se elimino el respaldo
+        # 'demanda_base' de la hoja Nodos. Un caso sin demanda produciria
+        # un despacho nulo y un costo cero, sin error visible.
+        raise ValueError(
+            "La hoja 'Demanda' esta vacia o ausente. Es obligatoria: "
+            "el respaldo 'demanda_base' de la hoja 'Nodos' fue eliminado.")
 
     return d
 

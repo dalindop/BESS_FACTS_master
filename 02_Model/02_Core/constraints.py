@@ -350,13 +350,18 @@ def build_constraints(model, data):
                                           rule=hid_lim_caudal_rule)
 
     # --- 3c.4 Balance del embalse -----------------------------------
-    # V_t = V_{t-1} + I_t - k*(q_t + S_t).  k convierte m3/s -> hm3/h.
+    # V_t = V_{t-1} + k*(I_t - q_t - S_t).  El factor k convierte m3/s a
+    # Mm3 por paso de tiempo y se aplica a LOS TRES terminos, porque los
+    # tres son caudales. Avendano (2022, ec. 3-15) escribe
+    #   V(t) = V(t-1) + 3600*dt*(I - sum(Q) - S).
+    # En consecuencia la hoja 'Aportes' debe venir en m3/s, dato directo
+    # de AporCaudal, no preconvertido a hm3/h.
     def hid_balance_rule(m, h, t):
         if pyo.value(m.Vmax_h[h]) <= 0:
             return pyo.Constraint.Skip
         v_ant = m.Vinit_h[h] if t == m.T.first() else m.V_h[h, t - 1]
-        return (m.V_h[h, t] == v_ant + m.I_h[h, t]
-                - m.k_q2v * (m.q_h[h, t] + m.S_h[h, t]))
+        return (m.V_h[h, t] == v_ant
+                + m.k_q2v * (m.I_h[h, t] - m.q_h[h, t] - m.S_h[h, t]))
     model.hid_balance = pyo.Constraint(model.H, model.T,
                                        rule=hid_balance_rule)
 
@@ -383,7 +388,7 @@ def build_constraints(model, data):
     def hid_vol_final_sup_rule(m, h):
         if pyo.value(m.Vmax_h[h]) <= 0:
             return pyo.Constraint.Skip
-        tol = m.tol_vol * (m.Vmax_h[h] - m.Vmin_h[h])
+        tol = m.tol_vol_sup * (m.Vmax_h[h] - m.Vmin_h[h])
         return m.V_h[h, m.T.last()] <= m.Vinit_h[h] + tol
     model.hid_vol_final_sup = pyo.Constraint(model.H,
                                              rule=hid_vol_final_sup_rule)
@@ -391,7 +396,7 @@ def build_constraints(model, data):
     def hid_vol_final_inf_rule(m, h):
         if pyo.value(m.Vmax_h[h]) <= 0:
             return pyo.Constraint.Skip
-        tol = m.tol_vol * (m.Vmax_h[h] - m.Vmin_h[h])
+        tol = m.tol_vol_inf * (m.Vmax_h[h] - m.Vmin_h[h])
         return m.V_h[h, m.T.last()] >= m.Vinit_h[h] - tol
     model.hid_vol_final_inf = pyo.Constraint(model.H,
                                              rule=hid_vol_final_inf_rule)

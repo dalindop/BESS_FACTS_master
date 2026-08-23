@@ -234,13 +234,25 @@ def build_parameters(model, data):
     model.I_h    = pyo.Param(model.H, model.T,
                              initialize=getattr(data, "aportes_hid", {}), default=0.0)
 
-    # Conversion de caudal a volumen: 1 m3/s durante 1 h = 0.0036 hm3
-    model.k_q2v = pyo.Param(initialize=0.0036)
+    # 1 m3/s durante dt horas equivale a 3600*dt/1e6 Mm3.
+    # Con dt = 1 h resulta k = 0.0036 Mm3 por cada m3/s.
+    # Se aplica a los tres terminos del balance (aporte, turbinado y
+    # vertimiento), que son los tres caudales: Avendano (2022, ec. 3-15).
+    model.dt_horas = pyo.Param(initialize=1.0)
+    model.k_q2v = pyo.Param(initialize=3600.0 * 1.0 / 1e6)
 
     # Tolerancia del cierre de volumen: |V_T - V_init| <= tol_vol*(Vmax-Vmin).
     # Se lee de Config con la clave tol_volumen_final; por defecto 0.05.
     model.tol_vol = pyo.Param(
         initialize=float(getattr(data, "tol_volumen_final", 0.05)))
+    # Banda asimetrica: claves tol_volumen_inf / tol_volumen_sup. Si no
+    # estan, ambas valen tol_volumen_final y la banda sigue siendo simetrica.
+    model.tol_vol_inf = pyo.Param(
+        initialize=float(getattr(data, "tol_volumen_inf",
+                                 getattr(data, "tol_volumen_final", 0.05))))
+    model.tol_vol_sup = pyo.Param(
+        initialize=float(getattr(data, "tol_volumen_sup",
+                                 getattr(data, "tol_volumen_final", 0.05))))
 
     # Penalizacion del vertimiento [USD por m3/s y hora]. NO es un costo
     # real: rompe la degeneracion entre turbinar y verter. Se lee de Config

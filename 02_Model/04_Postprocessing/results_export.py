@@ -266,6 +266,7 @@ def exportar_resultados(model, ruta_salida, valor_objetivo=None,
     # balance V_t = V_{t-1} + I_t - k*(q_t + S_t) cierra numericamente.
     ws = wb.create_sheet("Hidraulica")
     if len(model.H) > 0:
+        fila_actual = 1
         for h in model.H:
             encab = ["hora", "P (MW)", "q (m3/s)", "V (hm3)",
                      "S (m3/s)", "I (hm3/h)"]
@@ -283,7 +284,9 @@ def exportar_resultados(model, ruta_salida, valor_objetivo=None,
                     round(pyo.value(model.S_h[h, t]), 3),
                     round(pyo.value(model.I_h[h, t]), 4),
                 ])
-            _escribir_tabla(ws, encab, filas, f"Embalse {h}")
+            # fila_ini evita que cada unidad sobrescriba a la anterior.
+            fila_actual = _escribir_tabla(ws, encab, filas, f"Embalse {h}",
+                                          fila_ini=fila_actual) + 2
     else:
         _escribir_tabla(ws, ["-"], [["sin unidades hidraulicas"]],
                         "Operacion hidraulica")
