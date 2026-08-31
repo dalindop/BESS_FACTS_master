@@ -398,15 +398,28 @@ def cargar_datos(ruta_excel):
     d.sigma_niveles = [float(s) for s in str(sig_txt).split(",")]
     d.z_bloques = list(range(1, len(d.sigma_niveles) + 1))
     d.sigma = {z: s for z, s in zip(d.z_bloques, d.sigma_niveles)}
-    # La funcion de costo (de Oliveira et al. 1999, ec. A4) esta formulada
-    # para compensacion CAPACITIVA. Un sigma negativo produciria una
-    # potencia reactiva negativa y, por tanto, un costo de inversion
-    # negativo: el modelo cobraria por instalar el dispositivo.
+    # Se admite compensacion CAPACITIVA (sigma > 0, baja la reactancia) e
+    # INDUCTIVA (sigma < 0, la sube). El intervalo abierto es (-1, 1):
+    #   sigma >= 1  ->  X_new = X(1-sigma) <= 0, reactancia nula o
+    #                   negativa; ademas dB = B*sigma/(1-sigma) es
+    #                   singular en sigma = 1. Se rechaza siempre.
+    #   sigma <= -1 ->  X_new = X(1-sigma) >= 2X, positiva y finita: NO
+    #                   hay singularidad matematica. La cota inferior es
+    #                   una convencion de rango fisico del TCSC, que no
+    #                   duplica la reactancia de la linea. Se rechaza por
+    #                   realismo, no por indefinicion.
+    # El costo usa |sigma| (ver Q mas abajo): un reactor tiene costo de
+    # inversion analogo al de un condensador de la misma potencia.
     for z, sg in d.sigma.items():
-        if not (0.0 < sg < 1.0):
+        if not (-1.0 < sg < 1.0):
             raise ValueError(
-                f"sigma_niveles: el nivel {sg} esta fuera de (0,1). "
-                f"Solo se admite compensacion capacitiva.")
+                f"sigma_niveles: el nivel {sg} esta fuera de (-1,1). "
+                f"sigma >= 1 anula o invierte la reactancia; "
+                f"sigma <= -1 excede el rango fisico de un TCSC.")
+        if sg == 0.0:
+            raise ValueError(
+                "sigma_niveles: el nivel 0 no representa ningun "
+                "dispositivo (dB = 0, Q = 0).")
 
     d.c_tcsc = float(cfg.get("c_tcsc", 135000.0))      # USD/MVAr (overnight)
     d.vida_facts = int(cfg.get("vida_facts", 20))      # anios
@@ -417,6 +430,11 @@ def cargar_datos(ruta_excel):
     crf_f = _crf(d.tasa_descuento, d.vida_facts)
 
     th = d.theta_max_total
+    # Geometria de la linealizacion de perdidas, necesaria para acotar
+    # Lambda. Debe coincidir con parameters.py y constraints.py, que
+    # usan el mismo theta_max_total / n_seg_perdidas.
+    n_seg_p = int(d.n_seg_perdidas)
+    ancho_seg_p = th / n_seg_p
     d.lineas_facts = []
     d.facts_dB = {}          # (f,z) -> susceptancia adicional   [p.u.]
     d.facts_dG = {}          # (f,z) -> conductancia adicional   [p.u.]
@@ -453,18 +471,41 @@ def cargar_datos(ruta_excel):
             # instalado, el limite de flujo acota el angulo, de donde
             # |psi| <= sigma*Fmax/Sbase. Dos cotas: _on vale solo si
             # kappa=1; _off vale siempre (relajacion cuando kappa=0).
+            # B + dB = B/(1-sigma) > 0 para todo sigma en (-1,1), de
+            # modo que la division es valida tambien con sigma < 0. Con
+            # compensacion inductiva th_on CRECE: una linea mas reactiva
+            # admite mas angulo para el mismo flujo.
             th_on = min(th, (S_l / d.mva_base) / (B_l + dB))
+            # abs(dB) cubre los dos signos: con sigma < 0 la susceptancia
+            # adicional es negativa y la cota es sobre |psi|.
             d.facts_MB_on[(lid, z)] = abs(dB) * th_on
             d.facts_MB_off[(lid, z)] = abs(dB) * th
 
             # Conductancia adicional  [ec. 3-12; Luburic et al. 2020 ec.20]
             G_new = r_l / (r_l ** 2 + x_new ** 2) if r_l > 0 else 0.0
             d.facts_dG[(lid, z)] = G_new - G_l
-            d.facts_MG_on[(lid, z)] = th_on ** 2
+            # Cota de Lambda = sum_k alpha_k * delta_seg_k. Lambda NO
+            # vale dtheta^2: es la poligonal de Alguacil, que supera a la
+            # parabola entre nudos. Con th_on = w*(m + r) el minimo
+            # alcanzable de Lambda -el que impone el costo de perdidas-
+            # es  w^2*m^2 + w*(2m+1)*(th_on - m*w), que excede th_on^2 en
+            # w^2*r*(1-r). Usar th_on^2 recorta soluciones FACTIBLES en
+            # toda linea cuyo th_on no sea multiplo exacto de w. En th la
+            # expresion da w^2*K^2 = th^2, de modo que MG_off queda igual.
+            _m = min(n_seg_p, int(th_on / ancho_seg_p))
+            _lam = ancho_seg_p ** 2 * _m ** 2
+            if _m < n_seg_p:
+                _lam += ancho_seg_p * (2 * _m + 1) * (th_on - _m * ancho_seg_p)
+            d.facts_MG_on[(lid, z)] = _lam
             d.facts_MG_off[(lid, z)] = th ** 2
 
             # Potencia reactiva y costo  [ecs. 3-17, 3-18]
-            Q = sg * x_l * (S_l ** 2) / d.mva_base
+            # Se usa |sigma|: con sigma < 0 la formula original daria Q
+            # negativa y por tanto CAPEX negativo, es decir el modelo
+            # cobraria por instalar el dispositivo. Un reactor tiene
+            # costo de inversion analogo al de un condensador de la
+            # misma potencia reactiva.
+            Q = abs(sg) * x_l * (S_l ** 2) / d.mva_base
             d.facts_Q[(lid, z)] = Q
             d.facts_capex[(lid, z)] = d.c_tcsc * Q
             d.facts_anual[(lid, z)] = crf_f * d.c_tcsc * Q
